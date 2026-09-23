@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "repository": "https://github.com/amirf147/caster-plugins",
+  "plugins": {
+    "themed_hud": {
+      "version": "2.0.0",
+      "description": "Modular PyQt Heads-Up Display with themes and status strip",
+      "path": "plugins/themed_hud",
+      "dependencies": [
+        "PySide2"
+      ]
+    },
+    "taskbar_hud": {
+      "version": "1.0.0",
+      "description": "Windows 11 Taskbar Windhawk mod Named Pipe bridge",
+      "path": "plugins/taskbar_hud",
+      "dependencies": []
+    },
+    "adce": {
+      "version": "1.0.0",
+      "description": "Active Desktop Context Engine SSE client",
+      "path": "plugins/adce",
+      "dependencies": []
+    }
+  }
+}
