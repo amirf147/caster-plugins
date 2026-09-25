@@ -13,6 +13,7 @@ from castervoice.lib import printer
 from castervoice.lib.plugin import PluginBase
 from .bridge import TaskbarHudBridgeClient
 from .printer_handler import TaskbarHudPrintHandler
+from .context_resolver import resolve_active_rules
 
 _logger = logging.getLogger("caster.plugins.taskbar_hud")
 
@@ -37,11 +38,7 @@ class TaskbarHudPlugin(PluginBase):
         printer.get_delegating_handler().register_handler(self._print_handler)
 
         # 2. Register mic state observer on EngineModesManager
-        if (
-            nexus
-            and hasattr(nexus, "engine_modes_manager")
-            and nexus.engine_modes_manager
-        ):
+        if nexus and hasattr(nexus, "engine_modes_manager") and nexus.engine_modes_manager:
             nexus.engine_modes_manager.add_mic_listener(self._on_mic_mode_changed)
 
         # 3. Optionally attach to ADCE context listener if ADCE plugin is loaded
@@ -70,12 +67,7 @@ class TaskbarHudPlugin(PluginBase):
         )
 
     def _on_adce_context_changed(
-        self,
-        process_name="",
-        window_title="",
-        semantic_zone="",
-        active_file="",
-        is_connected=True,
+        self, process_name="", window_title="", semantic_zone="", active_file="", is_connected=True
     ):
         """Forwards ADCE sub-window zone transitions and active rules to Taskbar HUD."""
         if not self._bridge:
@@ -84,11 +76,16 @@ class TaskbarHudPlugin(PluginBase):
         rules_str = "Global"
         if is_connected and process_name:
             try:
-                from castervoice.asynch.hud_support import get_active_contextual_rules
-                active = get_active_contextual_rules(target_process=process_name, target_title=window_title)
+                active = resolve_active_rules(
+                    process_name=process_name,
+                    window_title=window_title,
+                    semantic_zone=semantic_zone,
+                )
                 rules_str = ", ".join(active) if active else "Global"
-            except Exception:
-                pass
+            except Exception as ex:
+                _logger.debug("Context resolution error: %s", ex)
+        if self._bridge._cached_rules != rules_str or self._bridge._cached_zone != zone:
+            print("[Taskbar HUD] Focus: '{}' -> Rules: '{}' | Zone: '{}'".format(process_name, rules_str, zone))
         self._bridge.send_update(adce_zone=zone, rules=rules_str)
 
     def start(self):
@@ -100,14 +97,8 @@ class TaskbarHudPlugin(PluginBase):
         super(TaskbarHudPlugin, self).stop()
         if self._bridge:
             self._bridge.stop()
-        if (
-            self._nexus
-            and hasattr(self._nexus, "engine_modes_manager")
-            and self._nexus.engine_modes_manager
-        ):
-            self._nexus.engine_modes_manager.remove_mic_listener(
-                self._on_mic_mode_changed
-            )
+        if self._nexus and hasattr(self._nexus, "engine_modes_manager") and self._nexus.engine_modes_manager:
+            self._nexus.engine_modes_manager.remove_mic_listener(self._on_mic_mode_changed)
 
 
 def get_plugin():
