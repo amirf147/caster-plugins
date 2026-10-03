@@ -10,15 +10,26 @@ Named Pipe bridge projecting real-time Caster voice recognition telemetry and Ac
 
 ## Architecture Overview
 
-This plugin intercepts Caster engine events, resolves active contextual grammar rules via dynamic AST inspection, and streams lightweight JSON telemetry packets over a low-latency Win32 Named Pipe (`\\.\pipe\CasterTaskbarHud`) to the native [Caster Taskbar HUD Windhawk Mod](https://github.com/amirf147/caster-taskbar-hud).
+This plugin intercepts Caster engine events, resolves active contextual grammar rules via two-phase evaluation (prioritizing active runtime memory with AST fallbacks), and streams lightweight NDJSON telemetry packets over a low-latency Win32 Named Pipe (`\\.\pipe\CasterTaskbarHud`) to the native [Caster Taskbar HUD Windhawk Mod](https://github.com/amirf147/caster-taskbar-hud).
 
 ```
 [ Caster Engine ] ---> [ taskbar_hud plugin ] ---> \\.\pipe\CasterTaskbarHud ---> [ Windhawk Mod in Explorer ]
                              |                                                               |
-                     - Context Resolver                                              - WinRT XAML Elements
-                     - ADCE Zone Tracker                                             - SystemTrayFrameGrid
-                     - Mic Mode Listener                                             - Status Dot & Carousel
+                     - SetWinEventHook Thread                                        - WinRT XAML Elements
+                     - Trailing-Edge Debouncer                                       - SystemTrayFrameGrid
+                     - Two-Phase Context Resolver                                    - Status Dot & Carousel
+                     - State Normalizer (Global)
 ```
+
+---
+
+## Features
+
+- **Event-Driven Focus Tracking**: Win32 `SetWinEventHook` thread captures foreground transitions with 0 ms latency.
+- **Debounced Live Sampling**: 40 ms settling window drains Alt+Tab bursts and samples true destination window handles.
+- **Two-Phase Rule Resolution**: Fast-path `AppContext` filtering followed by guarded `FuncContext` evaluation.
+- **Decoupled Operation**: Cleanly suppresses terminal rules in editor panes without requiring ADCE.
+- **Shell Overlay Exclusions**: Excludes Windows Alt+Tab overlays, taskbars, and desktop backdrops from triggering File Explorer rules.
 
 ---
 

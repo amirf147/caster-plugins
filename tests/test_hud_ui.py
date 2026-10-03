@@ -126,8 +126,10 @@ class TestHudUI(unittest.TestCase):
         """Verify that themed_hud plugin companion rules provide all customized HUD commands."""
         import sys, os
         plugin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugins", "themed_hud"))
-        if plugin_dir not in sys.path:
-            sys.path.insert(0, plugin_dir)
+        if plugin_dir in sys.path:
+            sys.path.remove(plugin_dir)
+        sys.path.insert(0, plugin_dir)
+        sys.modules.pop("rules", None)
         import rules
         rule_class, details = rules.get_rule()
         self.assertIsNotNone(rule_class)

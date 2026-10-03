@@ -16,8 +16,20 @@ This repository hosts standalone plugins for the [Caster](https://github.com/dic
 | Plugin | Version | Description | Target Environment |
 |---|---|---|---|
 | **`themed_hud`** | `2.0.0` | Modular PyQt Heads-Up Display with 10+ QSS themes, opacity sliders, status bar, and ADCE context strip. | Windows 10/11 Desktop Overlay |
-| [**`taskbar_hud`**](plugins/taskbar_hud) | `1.0.0` | Named Pipe bridge projecting real-time speech telemetry directly into the Windows 11 Taskbar via [Caster Taskbar HUD](https://github.com/amirf147/caster-taskbar-hud). | Windows 11 Taskbar |
+| [**`taskbar_hud`**](plugins/taskbar_hud) | `1.1.0` | Named Pipe bridge projecting real-time speech telemetry directly into the Windows 11 Taskbar via [Caster Taskbar HUD](https://github.com/amirf147/caster-taskbar-hud) with event-driven Win32 hooks and two-phase context resolution. | Windows 11 Taskbar |
 | **`adce`** | `1.0.0` | Active Desktop Context Engine SSE client providing sub-millisecond focus predicates for integrated terminals. | Local HTTP/SSE Port 8424 |
+| [**`plugin_manager`**](plugins/plugin_manager) | `1.0.0` | Extensible plugin manager GUI and headless registry engine with schema-driven configuration and companion voice rules. | Desktop Pop-up Dialog |
+
+---
+
+## Shared Architecture (`plugins/common`)
+
+All visual HUD plugins share a common foundation in `plugins/common`:
+- **Unified Context Resolver ([`context_resolver.py`](plugins/common/context_resolver.py))**: Prioritizes active in-memory Caster runtime data (`nexus._grammar_manager._managed_rules`) with AST fallbacks for offline testing. Implements two-phase evaluation (Phase 1: executable/title filtering; Phase 2: safe `FuncContext` execution).
+- **Shell Overlay Exclusions**: Automatically suppresses Windows Shell infrastructure windows (Alt+Tab overlays, taskbars, desktop backdrops) to prevent false-positive rule matches.
+- **Plugin Lifecycle Fallbacks ([`plugin_base.py`](plugins/common/plugin_base.py))**: Provides standard base classes ensuring seamless execution across varied environments.
+
+---
 
 ## Installation Workflow
 
@@ -25,7 +37,7 @@ Users install plugins into their personal user directory via the Caster plugin C
 
 ```powershell
 py -3.10 -m castervoice.bin.plugin_cli list
-py -3.10 -m castervoice.bin.plugin_cli install themed_hud
+py -3.10 -m castervoice.bin.plugin_cli install taskbar_hud
 ```
 
 Plugins install into `%LOCALAPPDATA%\caster\caster_user_content\plugins\<name>\` and activate automatically in `settings.toml`.

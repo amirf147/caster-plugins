@@ -67,16 +67,22 @@ pipe_name = "CasterTaskbarHud"
 
 1. **Named Pipe Bridge**:
    - On startup, the plugin connects to `\\.\pipe\CasterTaskbarHud`.
-   - If Windhawk or the mod is not running, the client queues reconnection attempts without blocking or stalling speech recognition.
+   - If Windhawk or the mod is not running, the client queues reconnection attempts asynchronously without blocking speech recognition.
 
 2. **Telemetry Streaming**:
    - **Microphone State**: Real-time updates when mic toggles (`on`, `sleeping`, `off`).
    - **Speech Recognition**: Displays recognized grammar phrases and live status in the taskbar widget.
-   - **Context Resolution**: When `adce` is loaded, it displays semantic sub-window zones. When `adce` is disabled, a built-in background watcher tracks active Win32 foreground windows and updates active voice rules.
+   - **State Normalization**: Guarantees empty or unmapped contexts resolve deterministically to `"Global"`, preventing stale rule latching across window transitions.
 
-3. **Enabling and Disabling**:
-   - Setting `enabled = false` completely disables Named Pipe connection attempts and unregisters the print/mic handlers.
-   - Setting `enabled = true` re-enables live telemetry streaming on the next Caster startup.
+3. **Event-Driven Window Focus & Debouncing**:
+   - **Win32 Event Hook**: Uses `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` in a dedicated worker thread with a Win32 message pump for 0 ms focus switch detection.
+   - **Trailing-Edge Debounce**: Employs a 40 ms settling window that collapses burst focus events during rapid Alt+Tab switching.
+   - **Live Sampling**: Samples `GetForegroundWindow()` after debounce settling to guarantee the true destination window is evaluated rather than transient shell overlays.
+
+4. **Two-Phase Context Resolution**:
+   - **Phase 1 (Fast-Path AppContext)**: Evaluates process executable stems and window titles against active rules loaded in Caster memory (`nexus._grammar_manager._managed_rules`).
+   - **Phase 2 (Guarded FuncContext)**: Evaluates attached dynamic predicates (such as `is_powershell_active`) in a safe sandbox. When ADCE is offline or focus is in an IDE editor buffer, terminal rules are suppressed automatically.
+   - **Shell Exclusions**: Filters Windows Shell infrastructure classes (`XamlExplorerHostIslandWindow`, `Shell_TrayWnd`, `Progman`) so Alt+Tab overlays and taskbars do not falsely trigger File Explorer rules.
 
 ---
 

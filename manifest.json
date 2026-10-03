@@ -11,7 +11,7 @@
       ]
     },
     "taskbar_hud": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "Windows 11 Taskbar Windhawk mod Named Pipe bridge",
       "path": "plugins/taskbar_hud",
       "dependencies": []
@@ -20,6 +20,12 @@
       "version": "1.0.0",
       "description": "Active Desktop Context Engine SSE client",
       "path": "plugins/adce",
+      "dependencies": []
+    },
+    "plugin_manager": {
+      "version": "1.0.0",
+      "description": "Plugin manager GUI and headless registry engine",
+      "path": "plugins/plugin_manager",
       "dependencies": []
     }
   }

@@ -6,3 +6,34 @@ dependencies = ["PySide2"]
 min_caster_version = "1.7.0"
 platforms = ["windows", "linux", "darwin"]
 entry_point = "plugin.py:ThemedHudPlugin"
+
+[options.theme]
+type = "choice"
+default = "classic"
+description = "Active UI color theme"
+choices = ["classic", "frosted-dark", "minimal-transparent", "high-contrast"]
+
+[options.opacity]
+type = "float"
+default = 1.0
+min = 0.1
+max = 1.0
+step = 0.05
+description = "HUD window opacity level"
+
+[options.status_border]
+type = "bool"
+default = true
+description = "Show microphone status color border"
+
+[options.show_status_bar]
+type = "bool"
+default = false
+description = "Display status strip at bottom of HUD"
+
+[options.port]
+type = "int"
+default = 8339
+min = 1024
+max = 65535
+description = "Telemetry streaming port"

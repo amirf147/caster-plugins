@@ -79,10 +79,14 @@ show_adce_strip = true
    - The HUD runs in an asynchronous subprocess to ensure UI rendering never blocks the Caster voice recognition loop.
    - IPC communication between Caster and the HUD occurs over a local socket connection.
 
-2. **Integration with Other Plugins**:
+2. **Unified Context Resolution**:
+   - Uses the shared `plugins.common.context_resolver` engine for two-phase context evaluation synchronized with active Caster memory and `rules.toml`.
+   - Guarantees strict resolution parity with `taskbar_hud`.
+
+3. **Integration with Other Plugins**:
    - **ADCE**: When `adce` is enabled, the HUD renders an active context strip displaying the current sub-window zone and focused file.
    - **Mic telemetry**: Automatically displays microphone state changes (`on`, `sleeping`, `off`).
 
-3. **Enabling and Disabling**:
+4. **Enabling and Disabling**:
    - When enabled, it replaces the default rudimentary Tkinter/text HUD with the Qt overlay.
    - When disabled (`enabled = false`), Caster falls back to standard text console logging or core HUD.

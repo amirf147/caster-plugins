@@ -1,0 +1,8 @@
+name = "plugin_manager"
+version = "1.0.0"
+description = "Plugin manager GUI and headless registry engine for external Caster plugins."
+author = "Amir Farhadi"
+dependencies = []
+min_caster_version = "1.7.0"
+platforms = ["windows", "linux", "darwin"]
+entry_point = "plugin.py:PluginManagerPlugin"
