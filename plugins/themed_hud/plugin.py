@@ -132,7 +132,15 @@ class ThemedHudPlugin(PluginBase):
     def stop(self):
         super(ThemedHudPlugin, self).stop()
         if self._print_handler:
-            printer.get_delegating_handler().unregister_handler(self._print_handler)
+            dh = printer.get_delegating_handler()
+            if hasattr(dh, "unregister_handler"):
+                dh.unregister_handler(self._print_handler)
+            elif hasattr(dh, "_handlers"):
+                try:
+                    if self._print_handler in dh._handlers:
+                        dh._handlers.remove(self._print_handler)
+                except Exception:
+                    pass
             self._print_handler = None
         if self._nexus and hasattr(self._nexus, "engine_modes_manager") and self._nexus.engine_modes_manager:
             self._nexus.engine_modes_manager.remove_mic_listener(self._on_mic_mode_changed)

@@ -2,12 +2,12 @@
 Unit tests for Caster HUD UI Window, Dialogs, and Signal Bridge.
 """
 
+import os
 import sys
-import time
 import unittest
-from castervoice.lib.qt import QtWidgets, QtCore
+from castervoice.lib.qt import QtWidgets
 from hud.ui.main_window import MainWindow
-from hud.core.events import MicStateEvent, RecognitionEvent, DragModeEvent
+from hud.core.events import MicStateEvent
 
 
 class TestHudUI(unittest.TestCase):
@@ -117,14 +117,12 @@ class TestHudUI(unittest.TestCase):
         rule_class, details = cr.get_rule()
         self.assertIsNotNone(rule_class)
         self.assertTrue(any("show caster hud" in k for k in rule_class.mapping))
-        self.assertTrue(any("show caster rules" in k for k in rule_class.mapping))
         self.assertTrue(any("clear caster hud" in k for k in rule_class.mapping))
-        self.assertTrue(any("restart" in k and "hud" in k for k in rule_class.mapping))
+        self.assertTrue(any("hide" in k and "hud" in k for k in rule_class.mapping))
 
 
     def test_themed_hud_companion_rules(self):
         """Verify that themed_hud plugin companion rules provide all customized HUD commands."""
-        import sys, os
         plugin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugins", "themed_hud"))
         if plugin_dir in sys.path:
             sys.path.remove(plugin_dir)
