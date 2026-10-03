@@ -9,10 +9,10 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional, Union
 
-from .config_store import PluginConfigStore
+from .config_store import CasterTomlConfigStore, PluginConfigStore
 from .models import PluginRecord
 from .scanner import PluginScanner
-from .storage import LocalJsonStateAdapter, StateStorageAdapter
+from .storage import CasterTomlStateAdapter, StateStorageAdapter
 from .validator import PluginValidator
 
 
@@ -26,12 +26,12 @@ class PluginRegistry:
         self,
         search_dirs: Optional[List[Union[str, Path]]] = None,
         storage: Optional[StateStorageAdapter] = None,
-        config_store: Optional[PluginConfigStore] = None,
+        config_store: Optional[Union[CasterTomlConfigStore, Any]] = None,
         validator: Optional[PluginValidator] = None,
         manifest_path: Optional[Union[str, Path]] = None,
     ):
         self._scanner = PluginScanner(search_dirs=search_dirs, manifest_path=manifest_path)
-        self._storage = storage or LocalJsonStateAdapter()
+        self._storage = storage or CasterTomlStateAdapter()
         self._config_store = config_store or PluginConfigStore()
         self._validator = validator or PluginValidator()
         self._cache: Dict[str, PluginRecord] = {}

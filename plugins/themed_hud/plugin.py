@@ -123,6 +123,7 @@ class ThemedHudPlugin(PluginBase):
         engine_name = engine.name if engine else ""
         if engine_name != "text":
             try:
+                hud_support.stop_hud()
                 hud_support.start_hud(hud_path=_HUD_RUNNER_PATH)
                 _logger.info("Themed HUD runner started: %s", _HUD_RUNNER_PATH)
             except Exception as ex:
@@ -159,6 +160,16 @@ class ThemedHudPlugin(PluginBase):
                 pub.stop()
         except Exception:
             pass
+
+        try:
+            from castervoice.lib import settings
+            legacy_hud_enabled = False
+            if settings.SETTINGS and isinstance(settings.SETTINGS.get("hud"), dict):
+                legacy_hud_enabled = settings.SETTINGS["hud"].get("enabled", False)
+            if legacy_hud_enabled:
+                hud_support.start_hud()
+        except Exception as ex:
+            _logger.debug("Failed to restore legacy HUD on themed HUD stop: %s", ex)
 
     def get_rules(self):
         try:

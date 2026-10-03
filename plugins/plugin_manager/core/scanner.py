@@ -8,8 +8,11 @@ Supports isolated TOML parsing and manifest reconciliation with per-directory fa
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import tomlkit
 
 try:
     import tomllib
@@ -26,36 +29,48 @@ _logger = logging.getLogger("caster.plugins.plugin_manager.scanner")
 
 
 def parse_toml_bytes(data: bytes) -> Dict[str, Any]:
-    """Parses TOML bytes using available standard or bundled parser."""
-    if tomllib is not None:
-        return tomllib.loads(data.decode("utf-8"))
+    """Parses TOML bytes using tomlkit, tomllib, or tomli."""
+    try:
+        doc = tomlkit.parse(data.decode("utf-8"))
+        return doc.unwrap() if hasattr(doc, "unwrap") else dict(doc)
+    except Exception as ex_tomlkit:
+        if tomllib is not None:
+            try:
+                return tomllib.loads(data.decode("utf-8"))
+            except Exception:
+                pass
+        raise ex_tomlkit
 
-    # Minimal fallback parser for simple key-value TOML if tomli/tomllib unavailable
-    result: Dict[str, Any] = {}
-    for line in data.decode("utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, val = line.split("=", 1)
-            key = key.strip()
-            val = val.strip()
-            if val.startswith('"') and val.endswith('"'):
-                result[key] = val[1:-1]
-            elif val.startswith("'") and val.endswith("'"):
-                result[key] = val[1:-1]
-            elif val.startswith("[") and val.endswith("]"):
-                inner = val[1:-1].strip()
-                if not inner:
-                    result[key] = []
-                else:
-                    items = [item.strip().strip('"').strip("'") for item in inner.split(",") if item.strip()]
-                    result[key] = items
-            elif val.lower() == "true":
-                result[key] = True
-            elif val.lower() == "false":
-                result[key] = False
-    return result
+
+def resolve_default_search_dirs() -> List[Path]:
+    """
+    Resolves standard plugin search directories across Caster user space and local source.
+    """
+    dirs: List[Path] = []
+
+    # 1. Caster user content plugins directory
+    user_dir_env = os.environ.get("CASTER_USER_DIR")
+    if user_dir_env:
+        cand_user = Path(user_dir_env).resolve() / "caster_user_content" / "plugins"
+        if cand_user.exists() and cand_user.is_dir() and cand_user not in dirs:
+            dirs.append(cand_user)
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        cand_appdata = Path(local_app_data).resolve() / "caster" / "caster_user_content" / "plugins"
+        if cand_appdata.exists() and cand_appdata.is_dir() and cand_appdata not in dirs:
+            dirs.append(cand_appdata)
+
+    home_caster = Path.home() / ".caster" / "caster_user_content" / "plugins"
+    if home_caster.exists() and home_caster.is_dir() and home_caster not in dirs:
+        dirs.append(home_caster.resolve())
+
+    # 2. Local development repository plugins directory
+    repo_plugins = Path(__file__).resolve().parents[2]
+    if repo_plugins.exists() and repo_plugins.is_dir() and repo_plugins.name == "plugins" and repo_plugins not in dirs:
+        dirs.append(repo_plugins)
+
+    return dirs
 
 
 class PluginScanner:
@@ -65,10 +80,13 @@ class PluginScanner:
 
     def __init__(self, search_dirs: Optional[List[Union[str, Path]]] = None, manifest_path: Optional[Union[str, Path]] = None):
         if search_dirs is None:
-            # Default to repo plugins directory relative to this file
-            current_file = Path(__file__).resolve()
-            plugins_root = current_file.parents[2]  # <repo>/plugins
-            self._search_dirs = [plugins_root]
+            resolved_defaults = resolve_default_search_dirs()
+            if resolved_defaults:
+                self._search_dirs = resolved_defaults
+            else:
+                # Fallback to repo root relative to this file
+                current_file = Path(__file__).resolve()
+                self._search_dirs = [current_file.parents[2]]
         else:
             self._search_dirs = [Path(p).resolve() for p in search_dirs]
 

@@ -6,7 +6,7 @@ Caster Plugin Manager Plugin lifecycle implementation.
 """
 
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 try:
     from castervoice.lib.plugin import PluginBase
@@ -16,6 +16,7 @@ except ImportError:
     except ImportError:
         from ..common.plugin_base import PluginBase
 
+from .core.ipc_server import PluginManagerIpcServer
 from .core.registry import PluginRegistry
 from .runner_bridge import close_manager
 
@@ -30,22 +31,34 @@ class PluginManagerPlugin(PluginBase):
     def __init__(self):
         super(PluginManagerPlugin, self).__init__()
         self._registry = PluginRegistry()
+        self._ipc_server: Optional[PluginManagerIpcServer] = None
 
     @property
     def registry(self) -> PluginRegistry:
         return self._registry
 
+    @property
+    def ipc_server(self) -> Optional[PluginManagerIpcServer]:
+        return self._ipc_server
+
     def initialize(self, nexus, config):
         super(PluginManagerPlugin, self).initialize(nexus, config)
-        _logger.info("PluginManagerPlugin initialized.")
+        cfg = config if isinstance(config, dict) else {}
+        port = int(cfg.get("ipc_port", 8344))
+        self._ipc_server = PluginManagerIpcServer(nexus=nexus, port=port)
+        _logger.info("PluginManagerPlugin initialized with IPC server on port %d.", port)
 
     def start(self):
         super(PluginManagerPlugin, self).start()
         self._registry.scan()
+        if self._ipc_server:
+            self._ipc_server.start()
         _logger.info("PluginManagerPlugin started. Discovered %d plugins.", len(self._registry.get_plugins()))
 
     def stop(self):
         super(PluginManagerPlugin, self).stop()
+        if self._ipc_server:
+            self._ipc_server.stop()
         close_manager()
         _logger.info("PluginManagerPlugin stopped.")
 

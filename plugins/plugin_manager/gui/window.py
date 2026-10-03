@@ -15,6 +15,7 @@ except ImportError:
     except ImportError:
         from castervoice.lib.qt import QtCore, QtGui, QtWidgets
 
+from ..core.ipc_client import PluginManagerIpcClient
 from ..core.models import PluginHealthState, PluginRecord
 from ..core.registry import PluginRegistry
 from .theme import get_stylesheet
@@ -31,9 +32,15 @@ class PluginManagerWindow(QtWidgets.QDialog):
     _DEFAULT_WIDTH = 780
     _DEFAULT_HEIGHT = 520
 
-    def __init__(self, registry: Optional[PluginRegistry] = None, parent: Optional[QtWidgets.QWidget] = None):
+    def __init__(
+        self,
+        registry: Optional[PluginRegistry] = None,
+        ipc_client: Optional[PluginManagerIpcClient] = None,
+        parent: Optional[QtWidgets.QWidget] = None,
+    ):
         super().__init__(parent)
         self._registry = registry or PluginRegistry()
+        self._ipc_client = ipc_client or PluginManagerIpcClient()
         self._row_widgets: Dict[str, PluginRowWidget] = {}
         self._all_records: Dict[str, PluginRecord] = {}
 
@@ -101,6 +108,10 @@ class PluginManagerWindow(QtWidgets.QDialog):
         self._footer_label.setObjectName("footerStatus")
         footer_layout.addWidget(self._footer_label)
         footer_layout.addStretch()
+
+        self._engine_status_label = QtWidgets.QLabel(self)
+        self._engine_status_label.setObjectName("engineStatusBadge")
+        footer_layout.addWidget(self._engine_status_label)
 
         root_layout.addLayout(footer_layout)
 
@@ -180,14 +191,22 @@ class PluginManagerWindow(QtWidgets.QDialog):
     def _on_plugin_toggled(self, plugin_name: str, new_state: bool):
         """Handles toggle switch event from child row widget."""
         try:
+            # 1. Update persisted configuration in settings.toml
             updated_record = self._registry.set_enabled(plugin_name, new_state)
             self._all_records[plugin_name] = updated_record
 
-            # Update row widget in place
+            # 2. Dispatch dynamic load/unload command to live Caster engine if connected
+            if self._ipc_client.is_connected():
+                if new_state:
+                    self._ipc_client.load_plugin(plugin_name)
+                else:
+                    self._ipc_client.unload_plugin(plugin_name)
+
+            # 3. Update row widget in place
             if plugin_name in self._row_widgets:
                 self._row_widgets[plugin_name].update_record(updated_record)
 
-            # Update detail pane if currently selected
+            # 4. Update detail pane if currently selected
             current_item = self._list_widget.currentItem()
             if current_item and current_item.data(QtCore.Qt.UserRole) == plugin_name:
                 self._detail_pane.set_plugin(updated_record)
@@ -218,6 +237,14 @@ class PluginManagerWindow(QtWidgets.QDialog):
         self._footer_label.setText(
             f"Total: {total} installed  |  Enabled: {enabled}  |  Ready: {ready}  |  Issues: {issues}"
         )
+
+        is_connected = self._ipc_client.is_connected()
+        if is_connected:
+            self._engine_status_label.setText("● Engine: Live Connected")
+            self._engine_status_label.setStyleSheet("color: #4ade80; font-size: 11px; font-weight: bold; margin-left: 10px;")
+        else:
+            self._engine_status_label.setText("○ Engine: Offline (Static Config Mode)")
+            self._engine_status_label.setStyleSheet("color: #94a3b8; font-size: 11px; margin-left: 10px;")
 
     def keyPressEvent(self, event: QtGui.QKeyEvent):
         """Handles keyboard navigation shortcuts."""

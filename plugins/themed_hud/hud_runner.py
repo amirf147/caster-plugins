@@ -81,8 +81,14 @@ def handler(signum, frame):
 def main():
     signal.signal(signal.SIGINT, handler)
     settings.initialize()
-    user_config = settings.SETTINGS.get("hud", {}) if (settings.SETTINGS and "hud" in settings.SETTINGS) else {}
-    merged_config = constants.merge_hud_config(user_config)
+    plugin_config = {}
+    if settings.SETTINGS and isinstance(settings.SETTINGS.get("plugins"), dict):
+        plugin_sub = settings.SETTINGS["plugins"].get("themed_hud", {})
+        if isinstance(plugin_sub, dict):
+            plugin_config = plugin_sub
+    legacy_config = settings.SETTINGS.get("hud", {}) if (settings.SETTINGS and isinstance(settings.SETTINGS.get("hud"), dict)) else {}
+    combined_config = {**legacy_config, **plugin_config}
+    merged_config = constants.merge_hud_config(combined_config)
 
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow(initial_config=merged_config)
