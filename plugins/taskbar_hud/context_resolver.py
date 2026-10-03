@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Amir Farhadi
 
 """
-Automated Rule Catalog and Universal Context Resolver for Caster HUDs
+Automated Rule Catalog and Universal Context Resolver for Taskbar HUD
 
 Dynamically catalogs application and contextual voice rules across user
 and built-in rule directories via AST inspection, mapping target executables
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-_logger = logging.getLogger("caster.plugins.context_resolver")
+_logger = logging.getLogger("caster.plugins.taskbar_hud.context_resolver")
 
 
 def normalize_process_name(raw_process: Optional[str]) -> str:

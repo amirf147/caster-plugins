@@ -49,9 +49,7 @@ class TaskbarHudBridgeClient(object):
         self._cached_mic_state = "on"
 
     @classmethod
-    def get_instance(
-        cls, pipe_name: str = "CasterTaskbarHud"
-    ) -> "TaskbarHudBridgeClient":
+    def get_instance(cls, pipe_name: str = "CasterTaskbarHud") -> "TaskbarHudBridgeClient":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -65,9 +63,7 @@ class TaskbarHudBridgeClient(object):
                 return
             self._running = True
             self._worker_thread = threading.Thread(
-                target=self._sender_loop,
-                name="TaskbarHUD-NamedPipe-Worker",
-                daemon=True,
+                target=self._sender_loop, name="TaskbarHUD-NamedPipe-Worker", daemon=True
             )
             self._worker_thread.start()
 
@@ -91,7 +87,6 @@ class TaskbarHudBridgeClient(object):
 
         if mic_state is not None:
             self._cached_mic_state = mic_state
-            packet["mic_state"] = mic_state
 
         current_mic = self._cached_mic_state
 
@@ -101,12 +96,10 @@ class TaskbarHudBridgeClient(object):
                 command = "Sleeping"
                 current_mic = "sleeping"
                 self._cached_mic_state = "sleeping"
-                packet["mic_state"] = "sleeping"
                 status = "sleeping"
             elif cmd_norm in ("caster on", "ready", "wake up"):
                 current_mic = "on"
                 self._cached_mic_state = "on"
-                packet["mic_state"] = "on"
                 status = "idle"
                 command = "Ready"
 
@@ -115,23 +108,26 @@ class TaskbarHudBridgeClient(object):
                 status = "sleeping"
 
             self._cached_command = command
-            packet["command"] = command
 
         if rules is not None:
             self._cached_rules = rules if isinstance(rules, str) else ", ".join(rules)
-            packet["rules"] = self._cached_rules
 
         if adce_zone is not None:
             self._cached_zone = adce_zone
-            packet["adce_zone"] = adce_zone
 
         if status is not None:
             if current_mic in ("sleeping", "off") and status != "sleeping":
                 status = "sleeping"
             self._cached_status = status
-            packet["status"] = status
 
-        packet["timestamp_ms"] = int(time.time() * 1000)
+        packet = {
+            "mic_state": self._cached_mic_state,
+            "command": self._cached_command,
+            "rules": self._cached_rules,
+            "adce_zone": self._cached_zone,
+            "status": self._cached_status,
+            "timestamp_ms": int(time.time() * 1000),
+        }
 
         try:
             self._queue.put_nowait(packet)
@@ -160,22 +156,24 @@ class TaskbarHudBridgeClient(object):
     def _sender_loop(self):
         """Background worker consuming queue and writing to Named Pipe with NDJSON framing."""
         handle = INVALID_HANDLE_VALUE
+        pending_payload = None
 
         while self._running:
-            try:
-                packet = self._queue.get(timeout=0.25)
-            except queue.Empty:
-                continue
-
-            packets = [packet]
-            while not self._queue.empty() and len(packets) < 16:
+            if pending_payload is None:
                 try:
-                    packets.append(self._queue.get_nowait())
+                    packet = self._queue.get(timeout=0.25)
                 except queue.Empty:
-                    break
+                    continue
 
-            json_lines = "".join(json.dumps(p) + "\n" for p in packets)
-            payload_bytes = json_lines.encode("utf-8")
+                packets = [packet]
+                while not self._queue.empty() and len(packets) < 16:
+                    try:
+                        packets.append(self._queue.get_nowait())
+                    except queue.Empty:
+                        break
+
+                json_lines = "".join(json.dumps(p) + "\n" for p in packets)
+                pending_payload = json_lines.encode("utf-8")
 
             if handle == INVALID_HANDLE_VALUE or handle == 0 or handle is None:
                 handle = _kernel32.CreateFileW(
@@ -189,24 +187,25 @@ class TaskbarHudBridgeClient(object):
                 )
                 if handle == INVALID_HANDLE_VALUE or handle == 0:
                     handle = INVALID_HANDLE_VALUE
-                    time.sleep(0.05)
+                    time.sleep(0.1)
                     continue
 
             written = wintypes.DWORD(0)
             ok = _kernel32.WriteFile(
                 handle,
-                payload_bytes,
-                len(payload_bytes),
+                pending_payload,
+                len(pending_payload),
                 ctypes.byref(written),
                 None,
             )
 
-            if not ok or written.value != len(payload_bytes):
+            if not ok or written.value != len(pending_payload):
                 _kernel32.CloseHandle(handle)
                 handle = INVALID_HANDLE_VALUE
-                time.sleep(0.05)
+                time.sleep(0.1)
             else:
                 _kernel32.FlushFileBuffers(handle)
+                pending_payload = None
 
         if handle != INVALID_HANDLE_VALUE and handle != 0 and handle is not None:
             _kernel32.CloseHandle(handle)

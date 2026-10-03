@@ -13,14 +13,7 @@ from castervoice.lib import printer
 
 _logger = logging.getLogger("caster.plugins.taskbar_hud.printer_handler")
 
-_MIC_COMMAND_FILTER = {
-    "caster sleep",
-    "caster on",
-    "caster off",
-    "sleep",
-    "wake up",
-    "stop listening",
-}
+_MIC_COMMAND_FILTER = {"caster sleep", "caster on", "caster off", "sleep", "wake up", "stop listening"}
 
 
 class TaskbarHudPrintHandler(printer.BaseMessageHandler):
@@ -40,9 +33,7 @@ class TaskbarHudPrintHandler(printer.BaseMessageHandler):
             try:
                 from .bridge import get_taskbar_hud_bridge
             except ImportError:
-                from caster_user_content.plugins.taskbar_hud.bridge import (
-                    get_taskbar_hud_bridge,
-                )
+                from caster_user_content.plugins.taskbar_hud.bridge import get_taskbar_hud_bridge
             self._bridge = get_taskbar_hud_bridge()
 
         if not self._bridge:
@@ -81,13 +72,9 @@ class TaskbarHudPrintHandler(printer.BaseMessageHandler):
                 sys_msg = raw[1:].strip()
                 sys_low = sys_msg.lower()
                 if "sleeping" in sys_low:
-                    self._bridge.send_update(
-                        command="Sleeping", status="sleeping", mic_state="sleeping"
-                    )
+                    self._bridge.send_update(command="Sleeping", status="sleeping", mic_state="sleeping")
                 elif "ready" in sys_low or "microphone is on" in sys_low:
-                    self._bridge.send_update(
-                        command="Ready", status="idle", mic_state="on"
-                    )
+                    self._bridge.send_update(command="Ready", status="idle", mic_state="on")
                 else:
                     self._bridge.send_update(command=sys_msg, status="idle")
 

@@ -1,14 +1,56 @@
+# Python bytecode & cache
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+
+# Environments
 .venv/
+venv/
+ENV/
+env/
+
+# Build & packaging
 *.egg-info/
 dist/
 build/
+eggs/
+.eggs/
+
+# Testing & Coverage
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
 .coverage
+.coverage.*
 htmlcov/
+.test_cache.json
+.cache/
+
+# IDE & Editor files
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.vs/
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.secret
+*.pfx
+credentials.json
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+
+# Agent / scratch directories
+scratch/
+.agents/scratch/

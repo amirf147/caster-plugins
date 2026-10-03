@@ -8,7 +8,13 @@ Integrates Caster voice recognition and mic telemetry with the Windows 11
 Taskbar HUD Windhawk mod via Named Pipe.
 """
 
+import ctypes
+from ctypes import wintypes
 import logging
+import os
+import threading
+import time
+
 from castervoice.lib import printer
 from castervoice.lib.plugin import PluginBase
 from .bridge import TaskbarHudBridgeClient
@@ -16,6 +22,51 @@ from .printer_handler import TaskbarHudPrintHandler
 from .context_resolver import resolve_active_rules
 
 _logger = logging.getLogger("caster.plugins.taskbar_hud")
+
+_user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
+
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _get_foreground_window_info():
+    """Returns (process_name, window_title) for active foreground window via native Win32."""
+    try:
+        hwnd = _user32.GetForegroundWindow()
+        if not hwnd:
+            return "", ""
+
+        # Window Title
+        length = _user32.GetWindowTextLengthW(hwnd)
+        title = ""
+        if length > 0:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            _user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+
+        # Process Name
+        pid = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return "", title
+
+        h_proc = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        proc_name = ""
+        if h_proc:
+            try:
+                size = wintypes.DWORD(1024)
+                name_buf = ctypes.create_unicode_buffer(1024)
+                if _kernel32.QueryFullProcessImageNameW(h_proc, 0, name_buf, ctypes.byref(size)):
+                    proc_name = os.path.basename(name_buf.value)
+                    if proc_name.lower().endswith(".exe"):
+                        proc_name = proc_name[:-4]
+            finally:
+                _kernel32.CloseHandle(h_proc)
+
+        return proc_name, title
+    except Exception as ex:
+        _logger.debug("Error querying foreground window info: %s", ex)
+        return "", ""
 
 
 class TaskbarHudPlugin(PluginBase):
@@ -27,6 +78,9 @@ class TaskbarHudPlugin(PluginBase):
         super(TaskbarHudPlugin, self).__init__()
         self._bridge = None
         self._print_handler = None
+        self._adce_connected = False
+        self._running = False
+        self._watcher_thread = None
 
     def initialize(self, nexus, config):
         super(TaskbarHudPlugin, self).initialize(nexus, config)
@@ -70,6 +124,7 @@ class TaskbarHudPlugin(PluginBase):
         self, process_name="", window_title="", semantic_zone="", active_file="", is_connected=True
     ):
         """Forwards ADCE sub-window zone transitions and active rules to Taskbar HUD."""
+        self._adce_connected = bool(is_connected)
         if not self._bridge:
             return
         zone = semantic_zone if (is_connected and semantic_zone) else "--"
@@ -90,13 +145,72 @@ class TaskbarHudPlugin(PluginBase):
 
     def start(self):
         super(TaskbarHudPlugin, self).start()
+        self._running = True
+
         if self._bridge:
             self._bridge.start()
 
+            # Push initial baseline state immediately on startup
+            current_mic = "on"
+            if self._nexus and hasattr(self._nexus, "engine_modes_manager") and self._nexus.engine_modes_manager:
+                current_mic = self._nexus.engine_modes_manager.get_mic_mode() or "on"
+
+            status = "sleeping" if current_mic in ("sleeping", "off") else "idle"
+            command = "Sleeping" if current_mic in ("sleeping", "off") else "Ready"
+
+            proc, title = _get_foreground_window_info()
+            active = resolve_active_rules(process_name=proc, window_title=title, semantic_zone="")
+            rules_str = ", ".join(active) if active else "Global"
+
+            self._bridge.send_update(
+                mic_state=current_mic,
+                status=status,
+                command=command,
+                rules=rules_str,
+                adce_zone="--",
+            )
+
+        # Start fallback window watcher loop when ADCE is not connected/disabled
+        self._watcher_thread = threading.Thread(
+            target=self._fallback_watcher_loop,
+            name="TaskbarHUD-FallbackWindowWatcher",
+            daemon=True,
+        )
+        self._watcher_thread.start()
+
+    def _fallback_watcher_loop(self):
+        """Polls foreground window changes when ADCE is offline or disabled."""
+        last_proc = None
+        last_title = None
+
+        while self._running:
+            if not self._adce_connected and self._bridge:
+                try:
+                    proc, title = _get_foreground_window_info()
+                    if proc != last_proc or title != last_title:
+                        last_proc = proc
+                        last_title = title
+                        active = resolve_active_rules(
+                            process_name=proc,
+                            window_title=title,
+                            semantic_zone="",
+                        )
+                        rules_str = ", ".join(active) if active else "Global"
+                        if self._bridge._cached_rules != rules_str:
+                            _logger.debug("[Taskbar HUD Fallback] Focus: '%s' -> Rules: '%s'", proc, rules_str)
+                        self._bridge.send_update(rules=rules_str, adce_zone="--")
+                except Exception as ex:
+                    _logger.debug("Fallback window watcher exception: %s", ex)
+            time.sleep(0.15)
+
     def stop(self):
         super(TaskbarHudPlugin, self).stop()
+        self._running = False
         if self._bridge:
             self._bridge.stop()
+        if self._print_handler:
+            printer.get_delegating_handler().unregister_handler(self._print_handler)
+            self._print_handler = None
         if self._nexus and hasattr(self._nexus, "engine_modes_manager") and self._nexus.engine_modes_manager:
             self._nexus.engine_modes_manager.remove_mic_listener(self._on_mic_mode_changed)
 

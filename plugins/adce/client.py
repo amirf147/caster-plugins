@@ -24,9 +24,15 @@ from castervoice.lib import printer
 
 _logger = logging.getLogger("caster.plugins.adce")
 
-IDE_PROCESS_NAMES = frozenset(
-    ["code", "antigravity ide", "cursor", "windsurf", "vscodium", "code - oss"]
-)
+IDE_PROCESS_NAMES = frozenset([
+    "code",
+    "antigravity",
+    "antigravity ide",
+    "cursor",
+    "windsurf",
+    "vscodium",
+    "code - oss",
+])
 
 
 class AdceBridgeClient(object):
@@ -47,6 +53,7 @@ class AdceBridgeClient(object):
         self._current_process = ""
         self._current_title = ""
         self._active_file = ""
+        self._current_terminal_shell = ""
         self._last_update_time = 0.0
         self._is_connected = False
         self._running = False
@@ -99,14 +106,10 @@ class AdceBridgeClient(object):
                 return
             self._running = True
 
-            self._sse_thread = threading.Thread(
-                target=self._sse_listener_loop, name="ADCE-SSE-Client", daemon=True
-            )
+            self._sse_thread = threading.Thread(target=self._sse_listener_loop, name="ADCE-SSE-Client", daemon=True)
             self._sse_thread.start()
 
-            self._poll_thread = threading.Thread(
-                target=self._polling_loop, name="ADCE-MCP-Poller", daemon=True
-            )
+            self._poll_thread = threading.Thread(target=self._polling_loop, name="ADCE-MCP-Poller", daemon=True)
             self._poll_thread.start()
 
     def stop(self):
@@ -128,13 +131,9 @@ class AdceBridgeClient(object):
 
                 self._is_connected = True
                 print(
-                    "\n[ADCE Bridge] Connected to ADCE live stream at http://{}:{}/sse".format(
-                        self._host, self._port
-                    )
+                    "\n[ADCE Bridge] Connected to ADCE live stream at http://{}:{}/sse".format(self._host, self._port)
                 )
-                printer.out(
-                    "ADCE: Connected (http://{}:{}/sse)".format(self._host, self._port)
-                )
+                printer.out("ADCE: Connected (http://{}:{}/sse)".format(self._host, self._port))
 
                 current_event = "message"
 
@@ -143,9 +142,7 @@ class AdceBridgeClient(object):
                     if not raw_line:
                         break
 
-                    line = (
-                        raw_line.decode("utf-8", errors="ignore").strip("\r\n").strip()
-                    )
+                    line = raw_line.decode("utf-8", errors="ignore").strip("\r\n").strip()
                     if not line or line.startswith(":"):
                         current_event = "message"
                         continue
@@ -164,9 +161,7 @@ class AdceBridgeClient(object):
                 if self._is_connected:
                     self._is_connected = False
                     self._post_url = None
-                    print(
-                        "\n[ADCE Bridge] Disconnected from ADCE daemon (reconnecting in background...)"
-                    )
+                    print("\n[ADCE Bridge] Disconnected from ADCE daemon (reconnecting in background...)")
                     self._notify_context_listeners("", "", "", "", False)
             except Exception as ex:
                 if self._is_connected:
@@ -186,9 +181,7 @@ class AdceBridgeClient(object):
         if not endpoint_data.startswith("http"):
             if not endpoint_data.startswith("/"):
                 endpoint_data = "/" + endpoint_data
-            self._post_url = "http://{}:{}{}".format(
-                self._host, self._port, endpoint_data
-            )
+            self._post_url = "http://{}:{}{}".format(self._host, self._port, endpoint_data)
         else:
             self._post_url = endpoint_data
 
@@ -217,9 +210,7 @@ class AdceBridgeClient(object):
 
     def _query_desktop_context(self):
         """Sends an MCP tools/call request for get_desktop_context."""
-        self._send_mcp_request(
-            method="tools/call", params={"name": "get_desktop_context", "arguments": {}}
-        )
+        self._send_mcp_request(method="tools/call", params={"name": "get_desktop_context", "arguments": {}})
 
     def _send_mcp_request(self, method: str, params: dict):
         """Dispatches JSON-RPC 2.0 message to ADCE session endpoint."""
@@ -227,20 +218,11 @@ class AdceBridgeClient(object):
             return
 
         self._request_counter += 1
-        payload = {
-            "jsonrpc": "2.0",
-            "id": self._request_counter,
-            "method": method,
-            "params": params,
-        }
+        payload = {"jsonrpc": "2.0", "id": self._request_counter, "method": method, "params": params}
         json_bytes = json.dumps(payload).encode("utf-8")
 
         try:
-            req = urllib.request.Request(
-                self._post_url,
-                data=json_bytes,
-                headers={"Content-Type": "application/json"},
-            )
+            req = urllib.request.Request(self._post_url, data=json_bytes, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=0.8) as resp:
                 _ = resp.read()
         except Exception:
@@ -276,49 +258,44 @@ class AdceBridgeClient(object):
             ide = snapshot.get("ide_context") or snapshot.get("IdeContext") or {}
 
             zone = focus.get("semantic_zone") or focus.get("SemanticZone") or "Unknown"
-            process = (
-                window.get("process_name") or window.get("ProcessName") or ""
-            ).lower()
+            process = (window.get("process_name") or window.get("ProcessName") or "").lower()
             title = window.get("title") or window.get("Title") or ""
-            duration_ms = (
-                snapshot.get("extraction_duration_ms")
-                or snapshot.get("ExtractionDurationMs")
-                or 0.0
-            )
+            duration_ms = snapshot.get("extraction_duration_ms") or snapshot.get("ExtractionDurationMs") or 0.0
 
             active_file = ""
             active_tab = ide.get("active_tab") or ide.get("ActiveTab")
             if active_tab and isinstance(active_tab, dict):
                 active_file = active_tab.get("title") or active_tab.get("Title") or ""
 
+            terminal = snapshot.get("terminal_context") or snapshot.get("TerminalContext") or {}
+            shell_title = terminal.get("shell_title") or terminal.get("ShellTitle") or ""
+            if not shell_title:
+                elem_name = focus.get("element_name") or focus.get("ElementName") or ""
+                if elem_name and any(sh in elem_name.lower() for sh in ("pwsh", "powershell", "bash", "cmd", "wsl", "zsh")):
+                    shell_title = elem_name
+
             prev_zone = self._current_zone
             prev_process = self._current_process
             prev_title = self._current_title
             prev_file = self._active_file
+            prev_shell = self._current_terminal_shell
 
             # Atomic RAM updates (O(1) lookup in memory)
             self._current_zone = zone
             self._current_process = process
             self._current_title = title
             self._active_file = active_file
+            self._current_terminal_shell = shell_title
             self._last_update_time = time.time()
 
             # Log live zone transitions in Caster console
-            if self._verbose_logging and (prev_zone != zone or prev_process != process):
+            if self._verbose_logging and (prev_zone != zone or prev_process != process or prev_shell != shell_title):
                 proc_display = process if process else "Desktop"
                 file_info = " | File: {}".format(active_file) if active_file else ""
-                print(
-                    "[ADCE Context] {} -> [{}]{} ({:.1f} ms)".format(
-                        proc_display, zone, file_info, duration_ms
-                    )
-                )
+                shell_info = " | Shell: {}".format(shell_title) if shell_title else ""
+                print("[ADCE Context] {} -> [{}]{}{} ({:.1f} ms)".format(proc_display, zone, file_info, shell_info, duration_ms))
 
-            if (
-                prev_zone != zone
-                or prev_process != process
-                or prev_title != title
-                or prev_file != active_file
-            ):
+            if prev_zone != zone or prev_process != process or prev_title != title or prev_file != active_file or prev_shell != shell_title:
                 self._notify_context_listeners(process, title, zone, active_file, True)
 
         except Exception as ex:
@@ -338,6 +315,7 @@ class AdceBridgeClient(object):
             "process_name": self._current_process,
             "window_title": self._current_title,
             "active_file": self._active_file,
+            "terminal_shell": self._current_terminal_shell,
         }
 
     def get_current_zone(self) -> str:
@@ -352,7 +330,14 @@ class AdceBridgeClient(object):
     def get_active_file(self) -> str:
         return self._active_file
 
+    def get_current_terminal_shell(self) -> str:
+        return self._current_terminal_shell
+
     _ZONE_SYNONYMS = {
+        "2": "terminal",
+        "1": "editorbuffer",
+        "11": "chatprompt",
+        "6": "webdocument",
         "integratedterminal": "terminal",
         "terminal": "terminal",
         "editorcodebuffer": "editorbuffer",
@@ -375,33 +360,25 @@ class AdceBridgeClient(object):
             if isinstance(app_names, str):
                 app_names = [app_names]
             app_set = {a.lower() for a in app_names}
-            if self._current_process not in app_set and not any(
-                a in self._current_process for a in app_set
-            ):
+            if self._current_process not in app_set and not any(a in self._current_process for a in app_set):
                 return False
 
-        return self._canonicalize_zone(self._current_zone) == self._canonicalize_zone(
-            target_zone
-        )
+        return self._canonicalize_zone(self._current_zone) == self._canonicalize_zone(target_zone)
 
     def is_ide_terminal(self) -> bool:
         """Predicate checking if focus is currently in an integrated IDE terminal."""
-        is_ide_app = any(ide in self._current_process for ide in IDE_PROCESS_NAMES)
+        is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
         return is_ide_app and self._canonicalize_zone(self._current_zone) == "terminal"
 
     def is_ide_editor(self) -> bool:
         """Predicate checking if focus is currently in a code editor buffer."""
-        is_ide_app = any(ide in self._current_process for ide in IDE_PROCESS_NAMES)
-        return (
-            is_ide_app and self._canonicalize_zone(self._current_zone) == "editorbuffer"
-        )
+        is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
+        return is_ide_app and self._canonicalize_zone(self._current_zone) == "editorbuffer"
 
     def is_ide_git_commit(self) -> bool:
         """Predicate checking if focus is in a Git commit message box."""
-        is_ide_app = any(ide in self._current_process for ide in IDE_PROCESS_NAMES)
-        return (
-            is_ide_app and self._canonicalize_zone(self._current_zone) == "gitcommitbox"
-        )
+        is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
+        return is_ide_app and self._canonicalize_zone(self._current_zone) == "gitcommitbox"
 
 
 adce = AdceBridgeClient.get_instance()
@@ -421,6 +398,10 @@ def is_ide_git_commit_focused(**kwargs):
 
 def get_current_zone():
     return adce.get_current_zone()
+
+
+def get_current_terminal_shell():
+    return adce.get_current_terminal_shell()
 
 
 def is_connected():

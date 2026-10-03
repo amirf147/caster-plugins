@@ -14,6 +14,7 @@ from .client import (
     is_ide_editor_focused,
     is_ide_git_commit_focused,
     get_current_zone,
+    get_current_terminal_shell,
     is_connected,
     print_adce_status,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "is_ide_editor_focused",
     "is_ide_git_commit_focused",
     "get_current_zone",
+    "get_current_terminal_shell",
     "is_connected",
     "print_adce_status",
     "AdcePlugin",
