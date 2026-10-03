@@ -2,432 +2,57 @@
 # Copyright (c) 2026 Amir Farhadi
 
 """
-Automated Rule Catalog and Universal Context Resolver for Themed HUD
+Themed HUD Context Resolver
 
-Dynamically catalogs application and contextual voice rules across user
-and built-in rule directories via AST inspection, mapping target executables
-and window titles directly to active rules synchronized with Caster's
-rules.toml configuration.
+Re-exports unified context resolution logic from plugins.common.context_resolver.
 """
 
-import ast
-import logging
-import os
-import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Set
-
-_logger = logging.getLogger("caster.plugins.themed_hud.context_resolver")
-
-
-def normalize_process_name(raw_process: Optional[str]) -> str:
-    """Normalizes process name or executable path to lowercase stem."""
-    if not raw_process:
-        return ""
-    p = str(raw_process).strip().lower().replace("/", "\\")
-    return Path(p).stem
-
-
-def format_display_name(raw_name: Optional[str], class_name: str, is_ccr: bool = False) -> str:
-    """Formats a clean, human-readable display title for a rule."""
-    name = str(raw_name).strip() if raw_name else class_name
-
-    # Normalize common naming inconsistencies
-    name = name.replace("fire fox", "firefox").replace("Fire Fox", "Firefox")
-
-    # Strip generic suffixes
-    for suffix in (" Rule", " rule", "Rule"):
-        if name.endswith(suffix):
-            name = name[: -len(suffix)].strip()
-
-    # Determine if CCR
-    ccr = is_ccr or any(class_name.endswith(x) for x in ("CCR", "CcrRule", "CCRRule", "Ccr"))
-    for suffix in (" CCR", " Ccr", "CCR", "Ccr"):
-        if name.endswith(suffix):
-            name = name[: -len(suffix)].strip()
-            ccr = True
-            break
-
-    if ccr:
-        name = f"{name} CCR"
-
-    if name.islower():
-        name = name.title()
-
-    return name
-
-
-def _eval_ast_value(val_node):
-    """Safely extracts python literals or container values from AST nodes."""
-    try:
-        return ast.literal_eval(val_node)
-    except Exception:
-        pass
-    if isinstance(val_node, ast.Constant):
-        return val_node.value
-    if isinstance(val_node, (ast.List, ast.Tuple)):
-        items = []
-        for elt in val_node.elts:
-            v = _eval_ast_value(elt)
-            if v is not None:
-                items.append(v)
-        return items
-    return None
-
-
-def resolve_caster_user_dir() -> Optional[Path]:
-    """Resolves Caster user directory across settings, env vars, OS standards, and fallbacks."""
-    # 1. Caster settings.SETTINGS["paths"]["USER_DIR"]
-    try:
-        from castervoice.lib import settings
-
-        if getattr(settings, "SETTINGS", None) and "paths" in settings.SETTINGS:
-            p = settings.SETTINGS["paths"].get("USER_DIR")
-            if p and Path(p).exists():
-                return Path(p)
-    except Exception:
-        pass
-
-    # 2. CASTER_USER_DIR environment variable
-    env_dir = os.environ.get("CASTER_USER_DIR")
-    if env_dir and Path(env_dir).exists():
-        return Path(env_dir)
-
-    # 3. Standard OS location: %LOCALAPPDATA%/caster on Windows, ~/.caster elsewhere
-    if os.name == "nt":
-        local_app = os.environ.get("LOCALAPPDATA")
-        if local_app:
-            p = Path(local_app) / "caster"
-            if p.exists():
-                return p
-    else:
-        p = Path.home() / ".caster"
-        if p.exists():
-            return p
-
-    # 4. Traversal fallback from __file__
-    cur = Path(__file__).resolve()
-    for parent in cur.parents:
-        if (parent / "settings" / "rules.toml").exists() or (parent / "caster_user_content").exists():
-            return parent
-
-    return None
-
-
-def resolve_rules_config_path(user_dir: Optional[Path] = None) -> Optional[Path]:
-    """Resolves rules.toml path across settings, user dir, and relative fallbacks."""
-    try:
-        from castervoice.lib import settings
-
-        if getattr(settings, "SETTINGS", None) and "paths" in settings.SETTINGS:
-            cfg_path = settings.SETTINGS["paths"].get("RULES_CONFIG_PATH")
-            if cfg_path and Path(cfg_path).exists():
-                return Path(cfg_path)
-    except Exception:
-        pass
-
-    if user_dir:
-        p = user_dir / "settings" / "rules.toml"
-        if p.exists():
-            return p
-
-    if os.name == "nt":
-        local_app = os.environ.get("LOCALAPPDATA")
-        if local_app:
-            p = Path(local_app) / "caster" / "settings" / "rules.toml"
-            if p.exists():
-                return p
-    else:
-        p = Path.home() / ".caster" / "settings" / "rules.toml"
-        if p.exists():
-            return p
-
-    cur = Path(__file__).resolve()
-    for parent in cur.parents:
-        p = parent / "settings" / "rules.toml"
-        if p.exists():
-            return p
-
-    return None
-
-
-def resolve_rule_search_dirs(user_dir: Optional[Path] = None) -> List[Path]:
-    """Discovers all rule directories: user content rules and core rules."""
-    search_dirs: List[Path] = []
-
-    def _add_dir(d: Optional[Path]):
-        if d and d.exists() and d not in search_dirs:
-            search_dirs.append(d)
-
-    # 1. User rules
-    if user_dir:
-        _add_dir(user_dir / "caster_user_content" / "rules")
-        _add_dir(user_dir / "rules")
-
-    if not search_dirs:
-        if os.name == "nt":
-            local_app = os.environ.get("LOCALAPPDATA")
-            if local_app:
-                base = Path(local_app) / "caster"
-                _add_dir(base / "caster_user_content" / "rules")
-                _add_dir(base / "rules")
-        else:
-            base = Path.home() / ".caster"
-            _add_dir(base / "caster_user_content" / "rules")
-            _add_dir(base / "rules")
-
-    # 2. Core rules
-    try:
-        from castervoice.lib import settings
-
-        if getattr(settings, "SETTINGS", None) and "paths" in settings.SETTINGS:
-            bp = settings.SETTINGS["paths"].get("BASE_PATH")
-            if bp:
-                _add_dir(Path(bp) / "rules")
-    except Exception:
-        pass
-
-    try:
-        import castervoice
-
-        _add_dir(Path(castervoice.__file__).parent / "rules")
-    except Exception:
-        pass
-
-    # 3. Traversal fallbacks from __file__
-    cur = Path(__file__).resolve()
-    for parent in cur.parents:
-        _add_dir(parent / "caster_user_content" / "rules")
-        _add_dir(parent / "rules")
-
-    return search_dirs
-
-
-class RuleEntry:
-    __slots__ = ("rule_class", "display_name", "executables", "titles")
-
-    def __init__(self, rule_class: str, display_name: str, executables: List[str], titles: List[str]):
-        self.rule_class = rule_class
-        self.display_name = display_name
-        self.executables = executables
-        self.titles = titles
-
-    def __repr__(self) -> str:
-        return f"<RuleEntry {self.rule_class} ({self.display_name})>"
-
-
-class RuleCatalog:
-    """
-    Automated in-memory catalog of all discovered voice rules.
-    Indexes target executables and window titles directly from rule source files,
-    cross-referenced with enabled rules in rules.toml.
-    """
-
-    def __init__(self):
-        self._proc_map: Dict[str, List[RuleEntry]] = {}
-        self._title_rules: List[RuleEntry] = []
-        self._enabled_rcns: Set[str] = set()
-        self._user_dir: Optional[Path] = resolve_caster_user_dir()
-        self._rules_config_path: Optional[Path] = resolve_rules_config_path(self._user_dir)
-        self._last_config_mtime: float = 0.0
-        self._catalog_built: bool = False
-        self.refresh_catalog()
-
-    def refresh_enabled(self):
-        """Reloads enabled rule class names from rules.toml if modified."""
-        if not self._rules_config_path or not self._rules_config_path.exists():
-            return
-        try:
-            mtime = self._rules_config_path.stat().st_mtime
-            if mtime != self._last_config_mtime:
-                self._last_config_mtime = mtime
-                data = None
-                try:
-                    from castervoice.lib import utilities
-
-                    data = utilities.load_toml_file(str(self._rules_config_path))
-                except Exception:
-                    pass
-
-                if data is None:
-                    # Fallback TOML loader
-                    try:
-                        if sys.version_info >= (3, 11):
-                            import tomllib
-
-                            with open(self._rules_config_path, "rb") as f:
-                                data = tomllib.load(f)
-                        else:
-                            import tomli
-
-                            with open(self._rules_config_path, "rb") as f:
-                                data = tomli.load(f)
-                    except Exception:
-                        pass
-
-                if isinstance(data, dict):
-                    enabled_list = data.get("_enabled_ordered", [])
-                    self._enabled_rcns = set(str(x) for x in enabled_list)
-        except Exception as ex:
-            _logger.debug("Failed to read rules.toml for enabled state: %s", ex)
-
-    def refresh_catalog(self):
-        """Scans user and core rule directories and rebuilds the lookup indexes."""
-        self._proc_map.clear()
-        self._title_rules.clear()
-
-        # Re-verify paths
-        if not self._user_dir or not self._user_dir.exists():
-            self._user_dir = resolve_caster_user_dir()
-        if not self._rules_config_path or not self._rules_config_path.exists():
-            self._rules_config_path = resolve_rules_config_path(self._user_dir)
-
-        scan_dirs = resolve_rule_search_dirs(self._user_dir)
-
-        for d in scan_dirs:
-            if not d.exists():
-                continue
-            for p in d.rglob("*.py"):
-                if p.name.startswith("_"):
-                    continue
-                self._parse_rule_file(p)
-
-        self._catalog_built = True
-        self.refresh_enabled()
-
-    def _parse_rule_file(self, file_path: Path):
-        """Inspects a rule module AST for get_rule() and RuleDetails metadata."""
-        try:
-            tree = ast.parse(file_path.read_text(encoding="utf-8", errors="ignore"))
-        except Exception:
-            return
-
-        rule_class = None
-        details = {}
-        has_get_rule = False
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "get_rule":
-                has_get_rule = True
-                for sub in ast.walk(node):
-                    if isinstance(sub, ast.Call):
-                        func_name = getattr(sub.func, "id", getattr(sub.func, "attr", ""))
-                        if func_name == "RuleDetails":
-                            for kw in sub.keywords:
-                                val = _eval_ast_value(kw.value)
-                                if val is not None:
-                                    details[kw.arg] = val
-                    if isinstance(sub, ast.Return):
-                        ret_val = sub.value
-                        if isinstance(ret_val, ast.Tuple) and len(ret_val.elts) >= 1:
-                            elt0 = ret_val.elts[0]
-                            rule_class = getattr(elt0, "id", getattr(elt0, "attr", None))
-                        elif isinstance(ret_val, ast.Name):
-                            rule_class = ret_val.id
-
-        if has_get_rule and rule_class:
-            raw_name = details.get("name")
-            is_ccr = bool(details.get("ccrtype"))
-            display = format_display_name(raw_name, rule_class, is_ccr=is_ccr)
-
-            execs = details.get("executable")
-            if isinstance(execs, str):
-                execs = [execs]
-            elif not isinstance(execs, list):
-                execs = []
-            exec_stems = [Path(str(e)).stem.lower() for e in execs if e]
-
-            titles = details.get("title")
-            if isinstance(titles, str):
-                titles = [titles]
-            elif not isinstance(titles, list):
-                titles = []
-            clean_titles = [str(t).lower() for t in titles if t]
-
-            entry = RuleEntry(
-                rule_class=rule_class,
-                display_name=display,
-                executables=exec_stems,
-                titles=clean_titles,
-            )
-
-            if exec_stems:
-                for stem in exec_stems:
-                    self._proc_map.setdefault(stem, []).append(entry)
-            if clean_titles and not exec_stems:
-                self._title_rules.append(entry)
-
-    def resolve(
-        self,
-        process_name: Optional[str] = None,
-        window_title: Optional[str] = None,
-        semantic_zone: Optional[str] = None,
-    ) -> List[str]:
-        """Resolves active contextual rules matching process and title."""
-        if not self._catalog_built:
-            self.refresh_catalog()
-        else:
-            self.refresh_enabled()
-
-        proc = normalize_process_name(process_name)
-        if not proc:
-            return []
-
-        candidates: List[RuleEntry] = []
-
-        # 1. Base executable stem lookup
-        if proc in self._proc_map:
-            candidates.extend(self._proc_map[proc])
-
-        # 2. Terminal shell aliases in terminal host windows
-        if proc in ("windowsterminal", "conhost", "cmd", "wt"):
-            t_low = (window_title or "").lower()
-            if "powershell" in t_low or "pwsh" in t_low:
-                candidates.extend(self._proc_map.get("powershell", []))
-                candidates.extend(self._proc_map.get("pwsh", []))
-
-        # 3. Title-based website rules (in browsers or any window with matched title)
-        if window_title:
-            t_low = window_title.lower()
-            for r in self._title_rules:
-                if any(t in t_low for t in r.titles):
-                    candidates.append(r)
-
-        # 4. Filter by enabled rules in rules.toml if available
-        active_names: List[str] = []
-        seen: Set[str] = set()
-        for r in candidates:
-            if self._enabled_rcns and r.rule_class not in self._enabled_rcns:
-                continue
-            name = r.display_name
-            if name and name not in seen:
-                seen.add(name)
-                active_names.append(name)
-
-        return active_names
-
-
-_GLOBAL_CATALOG: Optional[RuleCatalog] = None
-
-
-def get_catalog() -> RuleCatalog:
-    global _GLOBAL_CATALOG
-    if _GLOBAL_CATALOG is None:
-        _GLOBAL_CATALOG = RuleCatalog()
-    return _GLOBAL_CATALOG
-
-
-def resolve_active_rules(
-    process_name: Optional[str] = None,
-    window_title: Optional[str] = None,
-    semantic_zone: Optional[str] = None,
-) -> List[str]:
-    """
-    Deterministically resolves active contextual voice rules from process and title telemetry.
-    Returns an empty list [] for generic, untracked, or desktop contexts.
-    """
-    return get_catalog().resolve(
-        process_name=process_name,
-        window_title=window_title,
-        semantic_zone=semantic_zone,
+__all__ = [
+    "RuleCatalog",
+    "RuleEntry",
+    "format_display_name",
+    "get_catalog",
+    "normalize_process_name",
+    "resolve_active_rules",
+    "resolve_caster_user_dir",
+    "resolve_rule_search_dirs",
+    "resolve_rules_config_path",
+]
+
+try:
+    from plugins.common.context_resolver import (
+        RuleCatalog,
+        RuleEntry,
+        format_display_name,
+        get_catalog,
+        normalize_process_name,
+        resolve_active_rules,
+        resolve_caster_user_dir,
+        resolve_rule_search_dirs,
+        resolve_rules_config_path,
     )
+except ImportError:
+    try:
+        from ..common.context_resolver import (
+            RuleCatalog,
+            RuleEntry,
+            format_display_name,
+            get_catalog,
+            normalize_process_name,
+            resolve_active_rules,
+            resolve_caster_user_dir,
+            resolve_rule_search_dirs,
+            resolve_rules_config_path,
+        )
+    except ImportError:
+        from caster_user_content.plugins.common.context_resolver import (
+            RuleCatalog,
+            RuleEntry,
+            format_display_name,
+            get_catalog,
+            normalize_process_name,
+            resolve_active_rules,
+            resolve_caster_user_dir,
+            resolve_rule_search_dirs,
+            resolve_rules_config_path,
+        )

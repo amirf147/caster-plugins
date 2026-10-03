@@ -9,13 +9,18 @@ Integrates out-of-process semantic focus context stream into Caster.
 
 import atexit
 import logging
-import os
 import socket
 import subprocess
 import sys
 import time
 
-from castervoice.lib.plugin import PluginBase
+try:
+    from castervoice.lib.plugin import PluginBase
+except ImportError:
+    try:
+        from plugins.common.plugin_base import PluginBase
+    except ImportError:
+        from ..common.plugin_base import PluginBase
 from .client import AdceBridgeClient
 
 try:

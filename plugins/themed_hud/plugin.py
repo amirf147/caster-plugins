@@ -14,7 +14,13 @@ import sys
 import logging
 from dragonfly import get_current_engine
 from castervoice.lib import printer
-from castervoice.lib.plugin import PluginBase
+try:
+    from castervoice.lib.plugin import PluginBase
+except ImportError:
+    try:
+        from plugins.common.plugin_base import PluginBase
+    except ImportError:
+        from ..common.plugin_base import PluginBase
 from castervoice.asynch import hud_support
 
 _logger = logging.getLogger("caster.plugins.themed_hud")
@@ -158,4 +164,3 @@ class ThemedHudPlugin(PluginBase):
 
 def get_plugin():
     return ThemedHudPlugin()
-

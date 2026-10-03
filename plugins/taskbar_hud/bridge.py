@@ -110,7 +110,12 @@ class TaskbarHudBridgeClient(object):
             self._cached_command = command
 
         if rules is not None:
-            self._cached_rules = rules if isinstance(rules, str) else ", ".join(rules)
+            if isinstance(rules, str):
+                self._cached_rules = rules.strip() or "Global"
+            elif isinstance(rules, (list, tuple, set)):
+                self._cached_rules = ", ".join(rules) if rules else "Global"
+            else:
+                self._cached_rules = "Global"
 
         if adce_zone is not None:
             self._cached_zone = adce_zone

@@ -6,11 +6,7 @@ Unit tests for the Automated Rule Catalog & Universal Context Resolver.
 Verifies dynamic AST parsing, multi-tiered path discovery, and rules.toml synchronization.
 """
 
-import os
-import sys
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 from plugins.taskbar_hud.context_resolver import (
     RuleCatalog,
@@ -82,6 +78,53 @@ class TestContextResolver(unittest.TestCase):
             t_res = taskbar_resolve(process_name=proc, window_title=title)
             th_res = themed_resolve(process_name=proc, window_title=title)
             self.assertEqual(t_res, th_res, f"Mismatch for proc={proc}, title={title}")
+
+    def test_antigravity_vs_powershell_isolation(self):
+        """Verifies Antigravity IDE does not falsely match PowerShell rules when ADCE is offline."""
+        catalog = RuleCatalog()
+
+        # In Antigravity editor: Powershell rules must be suppressed by function_context
+        anti_rules = catalog.resolve(process_name="antigravity.exe", window_title="caster - Antigravity IDE")
+        self.assertFalse(any("Powershell" in r for r in anti_rules), f"Unexpected PowerShell rules in Antigravity: {anti_rules}")
+
+        # In PowerShell: Powershell rules must be active
+        ps_rules = catalog.resolve(process_name="powershell.exe", window_title="Windows PowerShell")
+        self.assertTrue(any("Powershell" in r for r in ps_rules), f"Expected PowerShell rules in PowerShell: {ps_rules}")
+        self.assertFalse(any("Antigravity" in r for r in ps_rules), f"Unexpected Antigravity rules in PowerShell: {ps_rules}")
+
+    def test_two_phase_function_context_evaluation(self):
+        """Verifies function_context gating and exception safety in RuleCatalog."""
+        catalog = RuleCatalog()
+
+        # Inject mock RuleEntry with function_context returning False
+        from plugins.common.context_resolver import RuleEntry
+        mock_false = RuleEntry("MockFalseRule", "Mock False", ["mockapp"], [], function_context=lambda **kw: False)
+        mock_true = RuleEntry("MockTrueRule", "Mock True", ["mockapp"], [], function_context=lambda **kw: True)
+        mock_err = RuleEntry("MockErrRule", "Mock Error", ["mockapp"], [], function_context=lambda **kw: 1 / 0)
+
+        catalog._proc_map["mockapp"] = [mock_false, mock_true, mock_err]
+        catalog._enabled_rcns.update({"MockFalseRule", "MockTrueRule", "MockErrRule"})
+
+        resolved = catalog.resolve(process_name="mockapp.exe", window_title="Test Window")
+        self.assertIn("Mock True", resolved)
+        self.assertNotIn("Mock False", resolved)
+        self.assertNotIn("Mock Error", resolved)
+
+    def test_explorer_shell_overlay_exclusion(self):
+        """Verifies Alt+Tab and shell overlay windows do not trigger File Explorer rules."""
+        catalog = RuleCatalog()
+        from unittest.mock import patch
+
+        # Mock Win32 GetClassNameW returning Alt+Tab XAML island window
+        with patch("plugins.common.context_resolver._get_window_class_name", return_value="XamlExplorerHostIslandWindow"):
+            shell_rules = catalog.resolve(process_name="explorer.exe", window_title="", hwnd=12345)
+            self.assertNotIn("File Explorer", shell_rules)
+
+        # Mock Win32 GetClassNameW returning actual folder window CabinetWClass
+        with patch("plugins.common.context_resolver._get_window_class_name", return_value="CabinetWClass"):
+            folder_rules = catalog.resolve(process_name="explorer.exe", window_title="Downloads", hwnd=12345)
+            if any(r.rule_class == "FileExplorerRule" for r in catalog._entries_by_class.values()):
+                self.assertTrue(any("File Explorer" in r for r in folder_rules))
 
 
 if __name__ == "__main__":
