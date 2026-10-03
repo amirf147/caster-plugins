@@ -115,6 +115,10 @@ class AdcePlugin(PluginBase):
 
     def initialize(self, nexus, config):
         super(AdcePlugin, self).initialize(nexus, config)
+        if sys.platform != "win32":
+            _logger.warning("adce plugin is only supported on Windows (win32). Skipping initialization.")
+            return
+
         self._host = config.get("host", "127.0.0.1")
         self._port = int(config.get("port", 8424))
         self._autostart = bool(config.get("autostart", True))
@@ -124,6 +128,8 @@ class AdcePlugin(PluginBase):
 
     def start(self):
         super(AdcePlugin, self).start()
+        if sys.platform != "win32":
+            return
 
         # 1. Probe daemon status and auto-spawn if missing and enabled
         if self._autostart and not _is_daemon_alive(self._host, self._port):

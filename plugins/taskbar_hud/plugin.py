@@ -12,6 +12,7 @@ import ctypes
 from ctypes import wintypes
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -23,8 +24,12 @@ from .context_resolver import resolve_active_rules
 
 _logger = logging.getLogger("caster.plugins.taskbar_hud")
 
-_user32 = ctypes.windll.user32
-_kernel32 = ctypes.windll.kernel32
+if sys.platform == "win32":
+    _user32 = ctypes.windll.user32
+    _kernel32 = ctypes.windll.kernel32
+else:
+    _user32 = None
+    _kernel32 = None
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -84,6 +89,10 @@ class TaskbarHudPlugin(PluginBase):
 
     def initialize(self, nexus, config):
         super(TaskbarHudPlugin, self).initialize(nexus, config)
+        if sys.platform != "win32":
+            _logger.warning("taskbar_hud plugin is only supported on Windows (win32). Skipping initialization.")
+            return
+
         pipe_name = config.get("pipe_name", "CasterTaskbarHud")
         self._bridge = TaskbarHudBridgeClient.get_instance(pipe_name=pipe_name)
 
@@ -145,6 +154,8 @@ class TaskbarHudPlugin(PluginBase):
 
     def start(self):
         super(TaskbarHudPlugin, self).start()
+        if sys.platform != "win32":
+            return
         self._running = True
 
         if self._bridge:

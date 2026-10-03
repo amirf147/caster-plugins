@@ -4,4 +4,5 @@ description = "Windows 11 Taskbar HUD Windhawk mod Named Pipe bridge."
 author = "Amir Farhadi"
 dependencies = []
 min_caster_version = "1.7.0"
+platforms = ["windows"]
 entry_point = "plugin.py:TaskbarHudPlugin"

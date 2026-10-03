@@ -4,4 +4,5 @@ description = "Modular PyQt Heads-Up Display with 10+ QSS themes, opacity contro
 author = "Amir Farhadi"
 dependencies = ["PySide2"]
 min_caster_version = "1.7.0"
+platforms = ["windows", "linux", "darwin"]
 entry_point = "plugin.py:ThemedHudPlugin"
