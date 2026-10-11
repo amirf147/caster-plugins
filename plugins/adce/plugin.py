@@ -7,7 +7,7 @@ Active Desktop Context Engine (ADCE) Plugin
 Integrates out-of-process semantic focus context stream into Caster.
 """
 
-import atexit
+import os
 import logging
 import socket
 import subprocess
@@ -23,6 +23,8 @@ except ImportError:
         from ..common.plugin_base import PluginBase
 from .client import AdceBridgeClient
 
+_DEFAULT_ADCE_REPO = os.path.normpath(os.path.expanduser(r"~\Documents\repos\active-desktop-context-engine"))
+
 try:
     from caster_user_content.environment_variables import ADCE_DIRECTORY, ADCE_PROJECT
 except ImportError:
@@ -31,6 +33,9 @@ except ImportError:
     except ImportError:
         ADCE_DIRECTORY = None
         ADCE_PROJECT = "src/ADCE.Daemon"
+
+if not ADCE_DIRECTORY and os.path.isdir(_DEFAULT_ADCE_REPO):
+    ADCE_DIRECTORY = _DEFAULT_ADCE_REPO
 
 _logger = logging.getLogger("caster.plugins.adce")
 
@@ -65,8 +70,11 @@ def _terminate_process_tree(pid: int):
 
 def _spawn_daemon(host="127.0.0.1", port=8424, command=None, cwd=None):
     """Spawns the ADCE daemon process detached in the background."""
-    if cwd is None and ADCE_DIRECTORY:
-        cwd = ADCE_DIRECTORY
+    if cwd is None:
+        if ADCE_DIRECTORY and os.path.isdir(ADCE_DIRECTORY):
+            cwd = ADCE_DIRECTORY
+        elif os.path.isdir(_DEFAULT_ADCE_REPO):
+            cwd = _DEFAULT_ADCE_REPO
 
     if command is None:
         if ADCE_PROJECT:
@@ -144,35 +152,21 @@ class AdcePlugin(PluginBase):
                 command=self._startup_command,
                 cwd=self._startup_cwd,
             )
-            if self._spawned_proc and not self._atexit_registered:
-                atexit.register(self._cleanup_spawned_process)
-                self._atexit_registered = True
             time.sleep(0.5)
+        elif _is_daemon_alive(self._host, self._port):
+            _logger.info("ADCE daemon already running on %s:%d. Reusing instance.", self._host, self._port)
 
         # 2. Start bridge client connection
         if self._client:
             self._client.start()
 
-    def _cleanup_spawned_process(self):
-        """Terminates daemon process tree if spawned by this Caster instance."""
-        proc = self._spawned_proc
-        self._spawned_proc = None
-        if proc is not None:
-            try:
-                _logger.info("Terminating auto-spawned ADCE daemon process tree (PID %s)...", proc.pid)
-                _terminate_process_tree(proc.pid)
-                try:
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
-            except Exception as ex:
-                _logger.debug("Error during ADCE daemon shutdown: %s", ex)
-
     def stop(self):
         super(AdcePlugin, self).stop()
         if self._client:
             self._client.stop()
-        self._cleanup_spawned_process()
+        # Decoupled daemon lifecycle: disabling the plugin disconnects the bridge client
+        # while leaving the background ADCE daemon process intact for other consumers.
+        self._spawned_proc = None
 
 
 def get_plugin():

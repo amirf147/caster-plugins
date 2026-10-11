@@ -7,6 +7,11 @@ min_caster_version = "1.7.0"
 platforms = ["windows", "linux", "darwin"]
 entry_point = "plugin.py:ThemedHudPlugin"
 
+[options.system_tray]
+type = "bool"
+default = true
+description = "Enable notification area system tray icon and hide from taskbar"
+
 [options.theme]
 type = "choice"
 default = "classic"
@@ -21,6 +26,11 @@ max = 1.0
 step = 0.05
 description = "HUD window opacity level"
 
+[options.frameless]
+type = "bool"
+default = false
+description = "Enable borderless transparent window mode with Win32 edge resizing"
+
 [options.status_border]
 type = "bool"
 default = true
@@ -30,6 +40,35 @@ description = "Show microphone status color border"
 type = "bool"
 default = false
 description = "Display status strip at bottom of HUD"
+
+[options.show_active_rules]
+type = "bool"
+default = true
+description = "Display active grammar rules tag bar"
+
+[options.show_context]
+type = "bool"
+default = false
+description = "Display ADCE dynamic window and focus context strip"
+
+[options.font_size]
+type = "int"
+default = 9
+min = 6
+max = 24
+description = "Telemetry log font point size"
+
+[options.max_history_lines]
+type = "int"
+default = 50
+min = 10
+max = 200
+description = "Maximum line capacity in recognition history buffer"
+
+[options.hide_scrollbars]
+type = "bool"
+default = false
+description = "Hide scrollbars in recognition log viewport"
 
 [options.port]
 type = "int"

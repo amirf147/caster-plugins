@@ -33,13 +33,13 @@ RESIZE_MARGIN_VERTICAL = 3       # Top / Bottom hit margin in pixels (optimized 
 
 # Comprehensive TOML Configuration Defaults
 DEFAULT_HUD_CONFIG = {
-    "system_tray": False,
+    "system_tray": True,
     "theme": "classic",
     "frameless": False,
     "opacity": 1.0,
     "status_border": True,
     "show_status_bar": False,
-    "show_active_rules": False,
+    "show_active_rules": True,
     "show_context": False,
     "max_history_lines": 50,
     "font_family": DEFAULT_FONT_FAMILY,

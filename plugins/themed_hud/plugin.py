@@ -11,6 +11,7 @@ frameless drag mode, and IPC telemetry.
 
 import os
 import sys
+import subprocess
 import logging
 from dragonfly import get_current_engine
 from castervoice.lib import printer
@@ -30,6 +31,79 @@ if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
 _HUD_RUNNER_PATH = os.path.join(_DIR, "hud_runner.py")
+_HUD_JOB_OBJECT = None
+
+
+def _get_or_create_hud_job():
+    global _HUD_JOB_OBJECT
+    if sys.platform != "win32":
+        return None
+    if _HUD_JOB_OBJECT is not None:
+        return _HUD_JOB_OBJECT
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(f, ctypes.c_uint64) for f in [
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount"
+            ]]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryLimit", ctypes.c_size_t),
+                ("PeakJobMemoryLimit", ctypes.c_size_t),
+            ]
+
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+
+        JobObjectExtendedLimitInformation = 9
+        res = kernel32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info)
+        )
+        if not res:
+            kernel32.CloseHandle(job)
+            return None
+        _HUD_JOB_OBJECT = job
+        return _HUD_JOB_OBJECT
+    except Exception:
+        return None
+
+
+def _bind_process_to_job(proc):
+    if sys.platform != "win32" or proc is None:
+        return
+    try:
+        job = _get_or_create_hud_job()
+        if job and hasattr(proc, "_handle") and proc._handle:
+            import ctypes
+            ctypes.windll.kernel32.AssignProcessToJobObject(job, int(proc._handle))
+    except Exception:
+        pass
 
 
 class ThemedHudPlugin(PluginBase):
@@ -42,6 +116,7 @@ class ThemedHudPlugin(PluginBase):
         super(ThemedHudPlugin, self).__init__()
         self._print_handler = None
         self._adce_client = None
+        self._process = None
 
     def initialize(self, nexus, config):
         super(ThemedHudPlugin, self).initialize(nexus, config)
@@ -123,9 +198,41 @@ class ThemedHudPlugin(PluginBase):
         engine_name = engine.name if engine else ""
         if engine_name != "text":
             try:
-                hud_support.stop_hud()
-                hud_support.start_hud(hud_path=_HUD_RUNNER_PATH)
-                _logger.info("Themed HUD runner started: %s", _HUD_RUNNER_PATH)
+                if self._process is not None and self._process.poll() is None:
+                    _logger.info("Themed HUD runner process is already running.")
+                    return
+
+                # Stop legacy HUD instance if active so port 8338 is released cleanly
+                try:
+                    hud_support.stop_hud()
+                except Exception:
+                    pass
+
+                python_bin = sys.executable
+                try:
+                    from castervoice.lib import settings
+                    if settings.SETTINGS and "paths" in settings.SETTINGS and "PYTHONW" in settings.SETTINGS["paths"]:
+                        cand = settings.SETTINGS["paths"]["PYTHONW"]
+                        if os.path.isfile(cand):
+                            python_bin = cand
+                except Exception:
+                    pass
+
+                self._process = subprocess.Popen([python_bin, _HUD_RUNNER_PATH])
+                _bind_process_to_job(self._process)
+                _logger.info("Themed HUD runner started: %s (PID: %s)", _HUD_RUNNER_PATH, self._process.pid)
+
+                # Route Caster core HUD paths so voice commands ("start caster hud", "restart caster hud")
+                # always interact with Themed HUD instead of falling back to legacy asynch/hud.py.
+                try:
+                    from castervoice.lib import settings
+                    if settings.SETTINGS and "paths" in settings.SETTINGS:
+                        self._original_hud_path = settings.SETTINGS["paths"].get("HUD_PATH")
+                        settings.SETTINGS["paths"]["HUD_PATH"] = _HUD_RUNNER_PATH
+                    hud_support._CURRENT_HUD_PATH = _HUD_RUNNER_PATH
+                    hud_support._HUD_PROCESS = self._process
+                except Exception as ex:
+                    _logger.debug("Failed to route core hud_support paths to Themed HUD: %s", ex)
             except Exception as ex:
                 printer.out("Themed HUD: Failed to start HUD process: {}".format(ex))
                 _logger.exception("Themed HUD startup error:")
@@ -151,7 +258,7 @@ class ThemedHudPlugin(PluginBase):
             except Exception:
                 pass
             self._adce_client = None
-        hud_support.stop_hud()
+
         try:
             from hud.ipc.client import get_telemetry_publisher
 
@@ -161,15 +268,28 @@ class ThemedHudPlugin(PluginBase):
         except Exception:
             pass
 
+        # Restore original HUD path in core settings if modified
         try:
             from castervoice.lib import settings
-            legacy_hud_enabled = False
-            if settings.SETTINGS and isinstance(settings.SETTINGS.get("hud"), dict):
-                legacy_hud_enabled = settings.SETTINGS["hud"].get("enabled", False)
-            if legacy_hud_enabled:
-                hud_support.start_hud()
+            if hasattr(self, "_original_hud_path") and self._original_hud_path and settings.SETTINGS and "paths" in settings.SETTINGS:
+                settings.SETTINGS["paths"]["HUD_PATH"] = self._original_hud_path
+            if hasattr(self, "_original_hud_path") and self._original_hud_path:
+                hud_support._CURRENT_HUD_PATH = self._original_hud_path
+            if getattr(hud_support, "_HUD_PROCESS", None) is self._process:
+                hud_support._HUD_PROCESS = None
         except Exception as ex:
-            _logger.debug("Failed to restore legacy HUD on themed HUD stop: %s", ex)
+            _logger.debug("Failed to restore core hud_support paths: %s", ex)
+
+        if self._process is not None:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=1.5)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            self._process = None
 
     def get_rules(self):
         try:

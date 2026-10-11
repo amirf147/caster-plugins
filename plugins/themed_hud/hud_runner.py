@@ -131,13 +131,18 @@ def main():
     ipc_server.start()
 
     # 2. Start Legacy XML-RPC Server (100% Backward Compatibility on port 8338)
-    rpc_port = int(Communicator().com_registry.get("hud", constants.DEFAULT_HUD_RPC_PORT))
-    rpc_server_address = (Communicator.LOCALHOST, rpc_port)
-    xmlrpc_server = SimpleXMLRPCServer(rpc_server_address, logRequests=False, allow_none=True)
-    _setup_xmlrpc_methods(xmlrpc_server, bridge)
-    rpc_thread = threading.Thread(target=xmlrpc_server.serve_forever)
-    rpc_thread.daemon = True
-    rpc_thread.start()
+    xmlrpc_server = None
+    try:
+        rpc_port = int(Communicator().com_registry.get("hud", constants.DEFAULT_HUD_RPC_PORT))
+        rpc_server_address = (Communicator.LOCALHOST, rpc_port)
+        xmlrpc_server = SimpleXMLRPCServer(rpc_server_address, logRequests=False, allow_none=True)
+        _setup_xmlrpc_methods(xmlrpc_server, bridge)
+        rpc_thread = threading.Thread(target=xmlrpc_server.serve_forever)
+        rpc_thread.daemon = True
+        rpc_thread.start()
+    except Exception as ex:
+        _logger = getattr(logging, "getLogger")("caster.plugins.themed_hud.runner")
+        _logger.debug("Legacy XML-RPC server could not bind to port %s: %s", rpc_port if 'rpc_port' in locals() else 8338, ex)
 
     exit_code = qapp_exec(app)
 

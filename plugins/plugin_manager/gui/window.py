@@ -5,6 +5,9 @@
 Main top-level pop-up dialog for Caster Plugin Manager.
 """
 
+import logging
+import os
+from pathlib import Path
 from typing import Dict, Optional
 
 try:
@@ -18,6 +21,9 @@ except ImportError:
 from ..core.ipc_client import PluginManagerIpcClient
 from ..core.models import PluginHealthState, PluginRecord
 from ..core.registry import PluginRegistry
+from ..core.storage import resolve_caster_settings_path
+
+_logger = logging.getLogger("caster.plugins.plugin_manager.gui.window")
 from .theme import get_stylesheet
 from .widgets.detail_pane import DetailPane
 from .widgets.plugin_row import PluginRowWidget
@@ -70,6 +76,11 @@ class PluginManagerWindow(QtWidgets.QDialog):
         self._search_input.setPlaceholderText("Filter plugins by name, description, author... (Ctrl+F)")
         self._search_input.textChanged.connect(self._on_filter_changed)
         header_layout.addWidget(self._search_input, stretch=1)
+
+        self._update_local_btn = QtWidgets.QPushButton("Update from Local", self)
+        self._update_local_btn.setToolTip("Synchronize installed plugins from local development repository")
+        self._update_local_btn.clicked.connect(self._on_update_from_local)
+        header_layout.addWidget(self._update_local_btn)
 
         self._refresh_btn = QtWidgets.QPushButton("Refresh (F5)", self)
         self._refresh_btn.clicked.connect(self.refresh_plugins)
@@ -277,3 +288,96 @@ class PluginManagerWindow(QtWidgets.QDialog):
                     return
 
         super().keyPressEvent(event)
+
+    def _resolve_local_source_dir(self, target_dir: Path) -> Optional[Path]:
+        """Resolves local source plugins repository directory across configuration targets."""
+        # 1. Environment variable override
+        repo_env = os.environ.get("CASTER_PLUGINS_REPO")
+        if repo_env:
+            p = Path(repo_env).resolve()
+            cand = p if p.name == "plugins" else (p / "plugins")
+            if cand.is_dir() and cand.resolve() != target_dir.resolve():
+                return cand
+
+        # 2. Local registry path in settings.toml
+        try:
+            settings_path = resolve_caster_settings_path()
+            if settings_path.exists():
+                import tomlkit
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    doc = tomlkit.parse(f.read())
+                reg_path = doc.get("plugins_config", {}).get("local_registry_path")
+                if reg_path:
+                    cand = Path(reg_path).resolve().parent / "plugins"
+                    if cand.is_dir() and cand.resolve() != target_dir.resolve():
+                        return cand
+        except Exception:
+            pass
+
+        # 3. Registry scanner manifest path
+        try:
+            manifest_path = getattr(self._registry.scanner, "manifest_path", None)
+            if manifest_path and Path(manifest_path).exists():
+                cand = Path(manifest_path).resolve().parent / "plugins"
+                if cand.is_dir() and cand.resolve() != target_dir.resolve():
+                    return cand
+        except Exception:
+            pass
+
+        # 4. Standard developer workspace paths
+        for dev_cand in [
+            Path.home() / "Documents" / "repos" / "caster-plugins" / "plugins",
+            Path(__file__).resolve().parents[3] / "plugins",
+        ]:
+            if dev_cand.is_dir() and dev_cand.resolve() != target_dir.resolve():
+                return dev_cand.resolve()
+
+        return None
+
+    def _on_update_from_local(self):
+        """Synchronizes plugins from local development repository into live Caster user space."""
+        from ..core.sync import PluginSyncEngine, resolve_default_target_dir
+
+        target_dir = resolve_default_target_dir()
+        source_dir = self._resolve_local_source_dir(target_dir)
+
+        if not source_dir or not source_dir.is_dir():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Update from Local",
+                "You don't have any local repository configured or found.\n\n"
+                "To configure a local source, set 'local_registry_path' in settings.toml "
+                "or set the CASTER_PLUGINS_REPO environment variable.",
+            )
+            return
+
+        try:
+            engine = PluginSyncEngine(source_dir=source_dir, target_dir=target_dir)
+            results = engine.sync_all(dry_run=False, prune_stale=True)
+
+            total_copied = sum(len(r["copied"]) for r in results.values())
+            total_deleted = sum(len(r["deleted"]) for r in results.values())
+
+            self.refresh_plugins()
+
+            if total_copied == 0 and total_deleted == 0:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Update from Local",
+                    f"All plugins are already up to date with local repository:\n{source_dir}",
+                )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Update from Local",
+                    f"Successfully synchronized plugins from local repository:\n{source_dir}\n\n"
+                    f"Copied/Updated: {total_copied} file(s)\n"
+                    f"Pruned: {total_deleted} stale file(s)",
+                )
+        except Exception as ex:
+            _logger.exception("Error during local plugin sync:")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Update Failed",
+                f"Failed to synchronize plugins from local repository:\n{ex}",
+            )

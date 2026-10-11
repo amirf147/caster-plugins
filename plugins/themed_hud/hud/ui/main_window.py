@@ -182,6 +182,13 @@ class MainWindow(QtWidgets.QMainWindow):
             flags |= TOOL_WINDOW_HINT
         if self.state.frameless:
             flags |= FRAMELESS_WINDOW_HINT
+        else:
+            customize_hint = qt_attr(QtCore, ("Qt", "CustomizeWindowHint"), ("Qt", "WindowType", "CustomizeWindowHint"))
+            title_hint = qt_attr(QtCore, ("Qt", "WindowTitleHint"), ("Qt", "WindowType", "WindowTitleHint"))
+            close_hint = qt_attr(QtCore, ("Qt", "WindowCloseButtonHint"), ("Qt", "WindowType", "WindowCloseButtonHint"))
+            min_max_hint = qt_attr(QtCore, ("Qt", "WindowMinMaxButtonsHint"), ("Qt", "WindowType", "WindowMinMaxButtonsHint"))
+            flags |= (customize_hint | title_hint | close_hint)
+            flags &= ~min_max_hint
         return flags
 
     def show_and_raise(self):
@@ -289,10 +296,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+
+        # Enforce HWND_TOPMOST on Windows so the recreated handle does not drop behind active windows
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = int(self.winId())
+                HWND_TOPMOST = -1
+                SWP_NOSIZE = 0x0001
+                SWP_NOMOVE = 0x0002
+                SWP_SHOWWINDOW = 0x0040
+                user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+            except Exception:
+                pass
+
         self.setFocus()
         self.log_widget.setFocus()
         self.border_controller.update_state(self.state)
         self.log_widget.append_system_text("HUD: {0}".format('Frameless' if new_frameless else 'Title Bar'), self.state.theme)
+
+    def toggle_status_border(self):
+        """Toggles colored safety status border indication on/off."""
+        is_enabled = not getattr(self.border_controller, "_enabled", True)
+        self.border_controller.set_enabled(is_enabled)
+        self.border_controller.update_state(self.state)
+        msg = "HUD: Safety Border Enabled" if is_enabled else "HUD: Safety Border Disabled"
+        self.log_widget.append_system_text(msg, self.state.theme)
 
     def toggle_drag_mode(self):
         """Toggles mouse & arrow key drag mode."""
@@ -555,9 +585,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         menu.addSeparator()
 
-        border_act = QAction("Toggle Border [T]", self)
+        border_act = QAction("Toggle Title Bar / Frameless [T]", self)
         border_act.triggered.connect(self.toggle_border)
         menu.addAction(border_act)
+
+        safety_border_act = QAction("Toggle Safety Border", self)
+        safety_border_act.triggered.connect(self.toggle_status_border)
+        menu.addAction(safety_border_act)
 
         drag_text = "Lock Drag Mode [D]" if self.drag_handler.is_drag_mode else "Enable Drag Mode [D]"
         drag_act = QAction(drag_text, self)
