@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Amir Farhadi
+
+name = "dynamic_cursor"
+version = "1.0.0"
+description = "Event-driven Dynamic Cursor bridge projecting Caster mic states and ADCE semantic focus badges onto the Windows hardware cursor."
+author = "Amir Farhadi"
+dependencies = []
+min_caster_version = "1.7.0"
+platforms = ["windows"]
+entry_point = "plugin.py:DynamicCursorPlugin"
+
+[options.pipe_name]
+type = "string"
+default = "dynamic_cursor"
+description = "Win32 Named Pipe endpoint name (\\\\.\\pipe\\<name>)"
+
+[options.autostart_daemon]
+type = "bool"
+default = true
+description = "Automatically launch dynamic-cursor-tray.exe if the Named Pipe is not active"
+
+[options.enable_mic_tint]
+type = "bool"
+default = true
+description = "Tint cursor body based on Caster microphone state (green awake, red sleeping)"
+
+[options.enable_context_badges]
+type = "bool"
+default = true
+description = "Stamp bottom-right context badges based on ADCE semantic focus zone and active application"
+
+[options.listening_tint]
+type = "string"
+default = "#44FF66"
+description = "Hex color tint when Caster microphone is awake/on"
+
+[options.sleeping_tint]
+type = "string"
+default = "#FF5555"
+description = "Hex color tint when Caster microphone is sleeping"
+
+[options.muted_tint]
+type = "string"
+default = "#888888"
+description = "Hex color tint when Caster microphone is off/muted"

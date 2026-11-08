@@ -27,6 +27,12 @@
       "description": "Plugin manager GUI and headless registry engine",
       "path": "plugins/plugin_manager",
       "dependencies": []
+    },
+    "dynamic_cursor": {
+      "version": "1.0.0",
+      "description": "Event-driven Dynamic Cursor bridge for mic states and ADCE semantic focus badges",
+      "path": "plugins/dynamic_cursor",
+      "dependencies": []
     }
   }
 }

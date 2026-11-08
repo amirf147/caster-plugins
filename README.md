@@ -19,6 +19,7 @@ This repository hosts standalone plugins for the [Caster](https://github.com/dic
 | [**`taskbar_hud`**](plugins/taskbar_hud) | `1.1.0` | Named Pipe bridge projecting real-time speech telemetry directly into the Windows 11 Taskbar via [Caster Taskbar HUD](https://github.com/amirf147/caster-taskbar-hud) with event-driven Win32 hooks and two-phase context resolution. | Windows 11 Taskbar |
 | **`adce`** | `1.0.0` | Active Desktop Context Engine SSE client providing sub-millisecond focus predicates for integrated terminals. | Local HTTP/SSE Port 8424 |
 | [**`plugin_manager`**](plugins/plugin_manager) | `1.0.0` | Extensible plugin manager GUI and headless registry engine with schema-driven configuration and companion voice rules. | Desktop Pop-up Dialog |
+| [**`dynamic_cursor`**](plugins/dynamic_cursor) | `1.0.0` | Event-driven bridge projecting Caster mic states and ADCE semantic focus badges onto the Windows hardware cursor. | Windows Hardware Cursor |
 
 ---
 
