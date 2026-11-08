@@ -3,7 +3,7 @@
 
 # Dynamic Cursor Plugin Guide
 
-The `dynamic_cursor` plugin bridges Caster microphone states and Active Desktop Context Engine (ADCE) semantic focus zones onto the Windows hardware cursor via a local Windows Named Pipe (`\\.\pipe\dynamic_cursor`).
+The `dynamic_cursor` plugin bridges Caster microphone states and Active Desktop Context Engine (ADCE) semantic focus zones onto the Windows hardware cursor via a local Windows Named Pipe (`\\.\pipe\dynamic_cursor`). It communicates with the standalone [dynamic-cursor](https://github.com/amirf147/dynamic-cursor) companion daemon.
 
 ---
 
@@ -13,7 +13,7 @@ The `dynamic_cursor` plugin bridges Caster microphone states and Active Desktop 
 |---|---|
 | **Operating System** | Windows 10/11 (64-bit) |
 | **Caster Version** | >= 1.7.0 |
-| **Companion Daemon** | `dynamic-cursor-tray.exe` running or discoverable in path |
+| **Companion Daemon** | [dynamic-cursor](https://github.com/amirf147/dynamic-cursor) (`dynamic-cursor-tray.exe` running or discoverable in path) |
 | **IPC Mechanism** | Windows Named Pipe (`\\.\pipe\dynamic_cursor`) |
 
 ---
@@ -96,3 +96,11 @@ muted_tint = "#888888"
 
 5. **Clean Restoration on Teardown**:
    When Caster exits or the plugin is disabled, `stop()` issues a `clear` operation to restore the default Windows cursor scheme before closing IPC handles.
+
+---
+
+## 5. Verification & Troubleshooting
+
+1. Ensure the companion daemon is built or installed from [dynamic-cursor](https://github.com/amirf147/dynamic-cursor).
+2. Start Caster with `dynamic_cursor` enabled.
+3. Verify pointer color tinting reflects microphone transitions (`awake`, `sleeping`, `off`) and contextual badges match active application zones.
