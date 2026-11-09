@@ -27,7 +27,7 @@ classifiers = [
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-pythonpath = [".", "plugins", "plugins/themed_hud"]
+pythonpath = [".", "plugins"]
 addopts = "-ra -q"
 
 [tool.ruff]

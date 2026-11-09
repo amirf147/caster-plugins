@@ -84,12 +84,12 @@ platforms = ["windows"]
 
         self.assertIn("adce", records)
         self.assertIn("taskbar_hud", records)
-        self.assertIn("themed_hud", records)
+        self.assertIn("dynamic_cursor", records)
         self.assertIn("plugin_manager", records)
 
-        themed_hud = records["themed_hud"]
-        self.assertEqual(themed_hud.metadata.name, "themed_hud")
-        self.assertIn("PySide2", themed_hud.metadata.dependencies)
+        taskbar_hud = records["taskbar_hud"]
+        self.assertEqual(taskbar_hud.metadata.name, "taskbar_hud")
+        self.assertEqual(taskbar_hud.metadata.platforms, ["windows"])
 
     def test_scanner_malformed_metadata_containment(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -121,6 +121,73 @@ platforms = ["windows"]
             self.assertEqual(records["valid_plugin"].health, PluginHealthState.READY)
             self.assertEqual(records["broken_plugin"].health, PluginHealthState.MALFORMED_METADATA)
             self.assertIsNotNone(records["broken_plugin"].diagnostic_message)
+
+    def test_multi_directory_scan_precedence(self):
+        """Verifies earlier search directories take precedence over later directories."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            user_dir = base / "user_content" / "plugins"
+            repo_dir = base / "repo" / "plugins"
+
+            user_plugin = user_dir / "custom_plugin"
+            repo_plugin = repo_dir / "custom_plugin"
+            repo_other = repo_dir / "repo_only_plugin"
+
+            user_plugin.mkdir(parents=True)
+            repo_plugin.mkdir(parents=True)
+            repo_other.mkdir(parents=True)
+
+            (user_plugin / "metadata.toml").write_text(
+                'name = "custom_plugin"\nversion = "2.0.0-user"\ndescription = "User override"\n',
+                encoding="utf-8",
+            )
+            (repo_plugin / "metadata.toml").write_text(
+                'name = "custom_plugin"\nversion = "1.0.0-repo"\ndescription = "Repo base"\n',
+                encoding="utf-8",
+            )
+            (repo_other / "metadata.toml").write_text(
+                'name = "repo_only_plugin"\nversion = "1.0.0"\ndescription = "Repo only"\n',
+                encoding="utf-8",
+            )
+
+            scanner = PluginScanner(search_dirs=[user_dir, repo_dir])
+            records = scanner.scan_all()
+
+            self.assertIn("custom_plugin", records)
+            self.assertIn("repo_only_plugin", records)
+            self.assertEqual(records["custom_plugin"].metadata.version, "2.0.0-user")
+            self.assertEqual(records["custom_plugin"].metadata.description, "User override")
+            self.assertEqual(records["repo_only_plugin"].metadata.version, "1.0.0")
+
+    def test_scanner_manifest_resolver_integration(self):
+        """Verifies PluginScanner resolves plugin records using connected ManifestResolver."""
+        import json
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            plugin_dir = base / "manifest_backed_plugin"
+            plugin_dir.mkdir()
+
+            manifest_file = base / "manifest.json"
+            manifest_payload = {
+                "version": 1,
+                "plugins": {
+                    "manifest_backed_plugin": {
+                        "version": "1.5.0",
+                        "description": "Discovered via ManifestResolver",
+                        "author": "Manifest Author",
+                    }
+                },
+            }
+            manifest_file.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+            scanner = PluginScanner(search_dirs=[base], manifest_path=manifest_file)
+            records = scanner.scan_all()
+
+            self.assertIn("manifest_backed_plugin", records)
+            rec = records["manifest_backed_plugin"]
+            self.assertEqual(rec.metadata.version, "1.5.0")
+            self.assertEqual(rec.metadata.description, "Discovered via ManifestResolver")
+            self.assertEqual(rec.metadata.author, "Manifest Author")
 
 
 class TestPluginValidator(unittest.TestCase):
@@ -204,7 +271,7 @@ class TestLocalStorageAdapter(unittest.TestCase):
 
             self.assertEqual(adapter.load_state(), {})
 
-            test_state = {"themed_hud": True, "adce": False}
+            test_state = {"taskbar_hud": True, "adce": False}
             adapter.save_state(test_state)
 
             loaded = adapter.load_state()
@@ -234,24 +301,24 @@ class TestPluginRegistryController(unittest.TestCase):
 
     def test_scan_and_get_plugin(self):
         plugins = self.registry.scan()
-        self.assertIn("themed_hud", plugins)
+        self.assertIn("taskbar_hud", plugins)
 
-        record = self.registry.get_plugin("themed_hud")
+        record = self.registry.get_plugin("taskbar_hud")
         self.assertIsNotNone(record)
-        self.assertEqual(record.metadata.name, "themed_hud")
+        self.assertEqual(record.metadata.name, "taskbar_hud")
 
     def test_set_enabled_and_persist(self):
         self.registry.scan()
-        record = self.registry.set_enabled("themed_hud", True)
+        record = self.registry.set_enabled("taskbar_hud", True)
         self.assertTrue(record.enabled)
 
         # Verify persisted on disk
         stored = self.storage.load_state()
-        self.assertTrue(stored.get("themed_hud"))
+        self.assertTrue(stored.get("taskbar_hud"))
 
         # Verify new registry instance reloads state
         new_reg = PluginRegistry(storage=self.storage)
-        reloaded_record = new_reg.get_plugin("themed_hud")
+        reloaded_record = new_reg.get_plugin("taskbar_hud")
         self.assertIsNotNone(reloaded_record)
         self.assertTrue(reloaded_record.enabled)
 
@@ -265,7 +332,7 @@ class TestPluginRegistryController(unittest.TestCase):
         self.assertGreater(len(exported), 0)
         names = [entry["name"] for entry in exported]
         self.assertIn("adce", names)
-        self.assertIn("themed_hud", names)
+        self.assertIn("taskbar_hud", names)
 
     def test_thread_safe_concurrent_toggles(self):
         self.registry.scan()
@@ -280,7 +347,7 @@ class TestPluginRegistryController(unittest.TestCase):
 
         threads = []
         for i in range(10):
-            t1 = threading.Thread(target=worker, args=("themed_hud", i % 2 == 0))
+            t1 = threading.Thread(target=worker, args=("taskbar_hud", i % 2 == 0))
             t2 = threading.Thread(target=worker, args=("adce", i % 2 != 0))
             threads.extend([t1, t2])
 

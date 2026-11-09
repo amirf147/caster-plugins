@@ -39,6 +39,7 @@ class TestPluginManagerIpc(unittest.TestCase):
         ]
         mock_pm.load_plugin.return_value = (True, "Loaded themed_hud")
         mock_pm.unload_plugin.return_value = (True, "Unloaded themed_hud")
+        mock_pm.reload_plugin.return_value = (True, "Reloaded themed_hud")
         mock_pm.reload_all.return_value = (True, "Reloaded all")
 
         server = PluginManagerIpcServer(port=TEST_PORT)
@@ -71,7 +72,13 @@ class TestPluginManagerIpc(unittest.TestCase):
             self.assertEqual(msg, "Unloaded themed_hud")
             mock_pm.unload_plugin.assert_called_once_with("themed_hud")
 
-            # 4. Reload all
+            # 4. Dynamic reload
+            ok, msg = client.reload_plugin("themed_hud")
+            self.assertTrue(ok)
+            self.assertEqual(msg, "Reloaded themed_hud")
+            mock_pm.reload_plugin.assert_called_once_with("themed_hud")
+
+            # 5. Reload all
             ok, msg = client.reload_all()
             self.assertTrue(ok)
             self.assertEqual(msg, "Reloaded all")

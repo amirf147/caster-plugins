@@ -6,7 +6,6 @@ Filesystem scanner and metadata parser for Caster plugins.
 Supports isolated TOML parsing and manifest reconciliation with per-directory fault containment.
 """
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -22,6 +21,7 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
 
+from .manifest import ManifestResolver
 from .models import PluginHealthState, PluginMetadata, PluginRecord
 from .options import OptionDefinition
 
@@ -84,19 +84,21 @@ class PluginScanner:
             if resolved_defaults:
                 self._search_dirs = resolved_defaults
             else:
-                # Fallback to repo root relative to this file
                 current_file = Path(__file__).resolve()
                 self._search_dirs = [current_file.parents[2]]
         else:
             self._search_dirs = [Path(p).resolve() for p in search_dirs]
 
-        if manifest_path is None:
-            # Check if manifest.json exists in repo root
-            current_file = Path(__file__).resolve()
-            possible_manifest = current_file.parents[3] / "manifest.json"
-            self._manifest_path = possible_manifest if possible_manifest.exists() else None
-        else:
-            self._manifest_path = Path(manifest_path).resolve() if manifest_path else None
+        self._manifest_resolver = ManifestResolver(manifest_path=manifest_path)
+        self._manifest_path = self._manifest_resolver.manifest_path
+
+    @property
+    def manifest_path(self) -> Optional[Path]:
+        return self._manifest_resolver.manifest_path
+
+    @property
+    def manifest_resolver(self) -> ManifestResolver:
+        return self._manifest_resolver
 
     @property
     def search_dirs(self) -> List[Path]:
@@ -131,11 +133,14 @@ class PluginScanner:
     def scan_all(self) -> Dict[str, PluginRecord]:
         """
         Scans all configured search directories and returns aggregated records.
+        Earlier search directories take precedence over later directories.
         """
         all_records: Dict[str, PluginRecord] = {}
         for search_dir in self._search_dirs:
             dir_records = self.scan_directory(search_dir)
-            all_records.update(dir_records)
+            for name, record in dir_records.items():
+                if name not in all_records:
+                    all_records[name] = record
         return all_records
 
     def _parse_metadata_file(self, plugin_dir: Path, metadata_file: Path) -> Tuple[str, PluginRecord]:
@@ -193,18 +198,13 @@ class PluginScanner:
 
     def _match_manifest_entry(self, plugin_dir: Path) -> Optional[PluginRecord]:
         """
-        Attempts to construct a PluginRecord using manifest.json if present.
+        Attempts to construct a PluginRecord using ManifestResolver if present.
         """
-        if not self._manifest_path or not self._manifest_path.exists():
+        entry = self._manifest_resolver.get_plugin_manifest_entry(plugin_dir.name)
+        if not entry:
             return None
 
         try:
-            manifest_data = json.loads(self._manifest_path.read_text(encoding="utf-8"))
-            plugins_dict = manifest_data.get("plugins", {})
-            entry = plugins_dict.get(plugin_dir.name)
-            if not entry:
-                return None
-
             raw_options = entry.get("options", {})
             parsed_options: Dict[str, OptionDefinition] = {}
             if isinstance(raw_options, dict):

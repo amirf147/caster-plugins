@@ -22,16 +22,43 @@ import urllib.error
 
 from castervoice.lib import printer
 
+try:
+    from plugins.common.desktop_context import (
+        DesktopContextProvider,
+        SemanticZone,
+        canonicalize_zone,
+    )
+except ImportError:
+    try:
+        from ..common.desktop_context import (
+            DesktopContextProvider,
+            SemanticZone,
+            canonicalize_zone,
+        )
+    except ImportError:
+        DesktopContextProvider = None
+        SemanticZone = None
+        canonicalize_zone = None
+
 _logger = logging.getLogger("caster.plugins.adce")
 
 IDE_PROCESS_NAMES = frozenset([
     "code",
-    "antigravity",
-    "antigravity ide",
     "cursor",
     "windsurf",
     "vscodium",
+    "antigravity",
+    "antigravity ide",
     "code - oss",
+    "devenv",
+    "pycharm64",
+    "idea64",
+    "clion64",
+    "rider64",
+    "sublime_text",
+    "zed",
+    "nvim",
+    "vim",
 ])
 
 
@@ -75,19 +102,31 @@ class AdceBridgeClient(object):
             if callback in self._context_listeners:
                 self._context_listeners.remove(callback)
 
-    def _notify_context_listeners(self, process, title, zone, file_name, is_connected):
+    def _notify_context_listeners(
+        self, process, title, zone, file_name, is_connected, terminal_shell=""
+    ):
         """Dispatches context changes to registered listeners."""
         with self._lock:
             listeners = list(self._context_listeners)
         for cb in listeners:
             try:
-                cb(
-                    process_name=process,
-                    window_title=title,
-                    semantic_zone=zone,
-                    active_file=file_name,
-                    is_connected=is_connected,
-                )
+                try:
+                    cb(
+                        process_name=process,
+                        window_title=title,
+                        semantic_zone=zone,
+                        active_file=file_name,
+                        terminal_shell=terminal_shell,
+                        is_connected=is_connected,
+                    )
+                except TypeError:
+                    cb(
+                        process_name=process,
+                        window_title=title,
+                        semantic_zone=zone,
+                        active_file=file_name,
+                        is_connected=is_connected,
+                    )
             except Exception as ex:
                 _logger.debug("Error in context listener %s: %s", cb, ex)
 
@@ -162,11 +201,11 @@ class AdceBridgeClient(object):
                     self._is_connected = False
                     self._post_url = None
                     print("\n[ADCE Bridge] Disconnected from ADCE daemon (reconnecting in background...)")
-                    self._notify_context_listeners("", "", "", "", False)
+                    self._handle_disconnect()
             except Exception as ex:
                 if self._is_connected:
                     self._is_connected = False
-                    self._notify_context_listeners("", "", "", "", False)
+                    self._handle_disconnect()
                 _logger.debug("ADCE SSE listener exception: %s", ex)
             finally:
                 if conn:
@@ -175,6 +214,36 @@ class AdceBridgeClient(object):
                     except Exception:
                         pass
                 time.sleep(1.5)
+
+    def _handle_disconnect(self):
+        """Handles ADCE disconnection while preserving foreground window details."""
+        if DesktopContextProvider:
+            provider = DesktopContextProvider.get_instance()
+            provider.update_adce_context(
+                semantic_zone="",
+                active_file="",
+                terminal_shell="",
+                is_connected=False,
+            )
+            snap = provider.get_current_snapshot()
+            self._current_process = snap.process_name or self._current_process
+            self._current_title = snap.window_title or self._current_title
+            self._current_zone = snap.semantic_zone
+            self._active_file = ""
+            self._current_terminal_shell = ""
+        else:
+            self._active_file = ""
+            self._current_terminal_shell = ""
+            self._current_zone = "Unknown"
+
+        self._notify_context_listeners(
+            self._current_process,
+            self._current_title,
+            self._current_zone,
+            "",
+            False,
+            terminal_shell="",
+        )
 
     def _handle_endpoint_event(self, endpoint_data: str):
         """Extracts session endpoint and executes MCP handshake."""
@@ -288,6 +357,16 @@ class AdceBridgeClient(object):
             self._current_terminal_shell = shell_title
             self._last_update_time = time.time()
 
+            if DesktopContextProvider:
+                DesktopContextProvider.get_instance().update_adce_context(
+                    semantic_zone=zone,
+                    active_file=active_file,
+                    terminal_shell=shell_title,
+                    is_connected=True,
+                    process_name=process,
+                    window_title=title,
+                )
+
             # Log live zone transitions in Caster console
             if self._verbose_logging and (prev_zone != zone or prev_process != process or prev_shell != shell_title):
                 proc_display = process if process else "Desktop"
@@ -296,7 +375,9 @@ class AdceBridgeClient(object):
                 print("[ADCE Context] {} -> [{}]{}{} ({:.1f} ms)".format(proc_display, zone, file_info, shell_info, duration_ms))
 
             if prev_zone != zone or prev_process != process or prev_title != title or prev_file != active_file or prev_shell != shell_title:
-                self._notify_context_listeners(process, title, zone, active_file, True)
+                self._notify_context_listeners(
+                    process, title, zone, active_file, True, terminal_shell=shell_title
+                )
 
         except Exception as ex:
             _logger.debug("Failed to ingest snapshot: %s", ex)
@@ -353,6 +434,10 @@ class AdceBridgeClient(object):
     @classmethod
     def _canonicalize_zone(cls, zone_str: str) -> str:
         norm = str(zone_str or "").lower().replace("_", "").replace(" ", "")
+        if canonicalize_zone and SemanticZone:
+            canon = canonicalize_zone(norm)
+            if canon != SemanticZone.UNKNOWN:
+                return canon
         return cls._ZONE_SYNONYMS.get(norm, norm)
 
     def is_zone(self, target_zone: str, app_names=None) -> bool:
@@ -368,17 +453,20 @@ class AdceBridgeClient(object):
     def is_ide_terminal(self) -> bool:
         """Predicate checking if focus is currently in an integrated IDE terminal."""
         is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
-        return is_ide_app and self._canonicalize_zone(self._current_zone) == "terminal"
+        zone = self._canonicalize_zone(self._current_zone)
+        return is_ide_app and zone in ("terminal", "integratedterminal", "2")
 
     def is_ide_editor(self) -> bool:
         """Predicate checking if focus is currently in a code editor buffer."""
         is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
-        return is_ide_app and self._canonicalize_zone(self._current_zone) == "editorbuffer"
+        zone = self._canonicalize_zone(self._current_zone)
+        return is_ide_app and zone in ("editor", "editorbuffer", "editorcodebuffer", "1")
 
     def is_ide_git_commit(self) -> bool:
         """Predicate checking if focus is in a Git commit message box."""
         is_ide_app = any(ide in self._current_process or self._current_process in ide for ide in IDE_PROCESS_NAMES)
-        return is_ide_app and self._canonicalize_zone(self._current_zone) == "gitcommitbox"
+        zone = self._canonicalize_zone(self._current_zone)
+        return is_ide_app and zone in ("document", "gitcommitbox", "18")
 
 
 adce = AdceBridgeClient.get_instance()

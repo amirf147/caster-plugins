@@ -9,8 +9,6 @@ and Taskbar HUD plugin.
 import unittest
 from unittest.mock import MagicMock
 
-from castervoice.lib import control, printer
-from castervoice.lib.ctrl.mgr.engine_manager import EngineModesManager
 
 try:
     from taskbar_hud import (

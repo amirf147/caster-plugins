@@ -99,9 +99,16 @@ class PluginRowWidget(QtWidgets.QWidget):
         # Format health badge
         color = get_health_color(record.health.value)
         health_text = record.health.value.replace("_", " ").upper()
-        self._badge.setText(f" {health_text} ")
+        if getattr(record, "is_running", False):
+            badge_text = " RUNNING "
+            badge_color = "#22c55e"
+        else:
+            badge_text = f" {health_text} "
+            badge_color = color
+
+        self._badge.setText(badge_text)
         self._badge.setStyleSheet(
-            f"background-color: {color}; color: #ffffff; border-radius: 4px; "
+            f"background-color: {badge_color}; color: #ffffff; border-radius: 4px; "
             f"padding: 3px 6px; font-size: 10px; font-weight: bold;"
         )
 

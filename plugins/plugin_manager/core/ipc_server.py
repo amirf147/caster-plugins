@@ -91,6 +91,20 @@ class PluginManagerIpcServer:
             _logger.exception("Error unloading plugin '%s':", name)
             return False, f"Exception unloading plugin '{name}': {ex}"
 
+    def reload_plugin(self, name: str) -> Tuple[bool, str]:
+        """Reloads a plugin by delegating to Caster PluginManager or performing unload then load."""
+        pm = self._get_caster_plugin_manager()
+        if pm is None:
+            return False, "Caster PluginManager instance is unavailable."
+        try:
+            if hasattr(pm, "reload_plugin"):
+                return pm.reload_plugin(name)
+            pm.unload_plugin(name)
+            return pm.load_plugin(name)
+        except Exception as ex:
+            _logger.exception("Error reloading plugin '%s':", name)
+            return False, f"Exception reloading plugin '{name}': {ex}"
+
     def reload_all(self) -> Tuple[bool, str]:
         """Stops, refreshes settings, and reloads all enabled plugins."""
         pm = self._get_caster_plugin_manager()
@@ -118,6 +132,7 @@ class PluginManagerIpcServer:
                 server.register_function(self.get_running_plugins, "get_running_plugins")
                 server.register_function(self.load_plugin, "load_plugin")
                 server.register_function(self.unload_plugin, "unload_plugin")
+                server.register_function(self.reload_plugin, "reload_plugin")
                 server.register_function(self.reload_all, "reload_all")
 
                 self._server = server

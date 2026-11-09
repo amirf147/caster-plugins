@@ -94,6 +94,21 @@ class PluginManagerIpcClient:
         except Exception as ex:
             return False, f"IPC unload command failed: {ex}"
 
+    def reload_plugin(self, name: str) -> Tuple[bool, str]:
+        """Requests Caster engine to reload a specific plugin."""
+        try:
+            proxy = self._get_proxy()
+            if hasattr(proxy, "reload_plugin"):
+                res = proxy.reload_plugin(name)
+            else:
+                proxy.unload_plugin(name)
+                res = proxy.load_plugin(name)
+            if isinstance(res, (list, tuple)) and len(res) >= 2:
+                return bool(res[0]), str(res[1])
+            return bool(res), f"Plugin '{name}' reload command executed."
+        except Exception as ex:
+            return False, f"IPC reload command failed: {ex}"
+
     def reload_all(self) -> Tuple[bool, str]:
         """Requests Caster engine to reload all enabled plugins."""
         try:

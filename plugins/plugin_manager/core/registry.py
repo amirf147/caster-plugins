@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 from .config_store import CasterTomlConfigStore, PluginConfigStore
 from .models import PluginRecord
 from .scanner import PluginScanner
-from .storage import CasterTomlStateAdapter, StateStorageAdapter
+from .storage import CasterTomlStateAdapter, SettingsTomlStore, StateStorageAdapter
 from .validator import PluginValidator
 
 
@@ -31,8 +31,27 @@ class PluginRegistry:
         manifest_path: Optional[Union[str, Path]] = None,
     ):
         self._scanner = PluginScanner(search_dirs=search_dirs, manifest_path=manifest_path)
-        self._storage = storage or CasterTomlStateAdapter()
-        self._config_store = config_store or PluginConfigStore()
+
+        if storage is None and config_store is None:
+            unified_store = SettingsTomlStore()
+            self._storage = unified_store
+            self._config_store = unified_store
+        elif storage is not None and config_store is None:
+            self._storage = storage
+            if isinstance(storage, SettingsTomlStore):
+                self._config_store = storage
+            else:
+                self._config_store = PluginConfigStore()
+        elif storage is None and config_store is not None:
+            self._config_store = config_store
+            if isinstance(config_store, SettingsTomlStore):
+                self._storage = config_store
+            else:
+                self._storage = CasterTomlStateAdapter()
+        else:
+            self._storage = storage
+            self._config_store = config_store
+
         self._validator = validator or PluginValidator()
         self._cache: Dict[str, PluginRecord] = {}
         self._lock = threading.RLock()

@@ -6,9 +6,8 @@ Main top-level pop-up dialog for Caster Plugin Manager.
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 try:
     from PySide2 import QtCore, QtGui, QtWidgets
@@ -21,13 +20,12 @@ except ImportError:
 from ..core.ipc_client import PluginManagerIpcClient
 from ..core.models import PluginHealthState, PluginRecord
 from ..core.registry import PluginRegistry
-from ..core.storage import resolve_caster_settings_path
-
-_logger = logging.getLogger("caster.plugins.plugin_manager.gui.window")
 from .theme import get_stylesheet
 from .widgets.detail_pane import DetailPane
 from .widgets.plugin_row import PluginRowWidget
 from .widgets.settings_form import SettingsFormWidget
+
+_logger = logging.getLogger("caster.plugins.plugin_manager.gui.window")
 
 
 class PluginManagerWindow(QtWidgets.QDialog):
@@ -49,6 +47,7 @@ class PluginManagerWindow(QtWidgets.QDialog):
         self._ipc_client = ipc_client or PluginManagerIpcClient()
         self._row_widgets: Dict[str, PluginRowWidget] = {}
         self._all_records: Dict[str, PluginRecord] = {}
+        self._running_plugins: Set[str] = set()
 
         self._init_window_properties()
         self._init_ui()
@@ -106,6 +105,7 @@ class PluginManagerWindow(QtWidgets.QDialog):
         self._tabs = QtWidgets.QTabWidget(self)
         self._detail_pane = DetailPane(self)
         self._settings_form = SettingsFormWidget(config_store=self._registry.config_store, parent=self)
+        self._settings_form.config_saved.connect(self._on_plugin_config_saved)
 
         self._tabs.addTab(self._detail_pane, "Overview")
         self._tabs.addTab(self._settings_form, "Settings")
@@ -127,16 +127,31 @@ class PluginManagerWindow(QtWidgets.QDialog):
         root_layout.addLayout(footer_layout)
 
     def refresh_plugins(self):
-        """Forces a full filesystem scan and refreshes list entries."""
+        """Forces a full filesystem scan, queries runtime IPC state, and refreshes list entries."""
         selected_name = None
         current_item = self._list_widget.currentItem()
         if current_item:
             selected_name = current_item.data(QtCore.Qt.UserRole)
 
         self._all_records = self._registry.scan()
+        if self._ipc_client.is_connected():
+            self._running_plugins = self._ipc_client.get_running_plugins()
+        else:
+            self._running_plugins = set()
+
+        for name, record in self._all_records.items():
+            record.is_running = name in self._running_plugins
+
         self._settings_form.set_config_store(self._registry.config_store)
         self._populate_list(selected_name)
         self._update_footer_status()
+
+    def _on_plugin_config_saved(self, plugin_name: str, config: Dict[str, Any]):
+        """Dispatches dynamic reload command to live Caster engine when plugin settings are saved."""
+        if self._ipc_client.is_connected():
+            record = self._all_records.get(plugin_name)
+            if record and record.enabled:
+                self._ipc_client.reload_plugin(plugin_name)
 
     def _populate_list(self, previously_selected_name: Optional[str] = None):
         """Populates the QListWidget based on current search filter."""
@@ -212,6 +227,8 @@ class PluginManagerWindow(QtWidgets.QDialog):
                     self._ipc_client.load_plugin(plugin_name)
                 else:
                     self._ipc_client.unload_plugin(plugin_name)
+                self._running_plugins = self._ipc_client.get_running_plugins()
+                updated_record.is_running = plugin_name in self._running_plugins
 
             # 3. Update row widget in place
             if plugin_name in self._row_widgets:
@@ -233,6 +250,7 @@ class PluginManagerWindow(QtWidgets.QDialog):
     def _update_footer_status(self):
         total = len(self._all_records)
         enabled = sum(1 for r in self._all_records.values() if r.enabled)
+        running = len(self._running_plugins) if hasattr(self, "_running_plugins") else 0
         ready = sum(1 for r in self._all_records.values() if r.health == PluginHealthState.READY)
         issues = sum(
             1
@@ -246,7 +264,7 @@ class PluginManagerWindow(QtWidgets.QDialog):
             )
         )
         self._footer_label.setText(
-            f"Total: {total} installed  |  Enabled: {enabled}  |  Ready: {ready}  |  Issues: {issues}"
+            f"Total: {total} installed  |  Enabled: {enabled}  |  Running: {running}  |  Ready: {ready}  |  Issues: {issues}"
         )
 
         is_connected = self._ipc_client.is_connected()
@@ -291,48 +309,8 @@ class PluginManagerWindow(QtWidgets.QDialog):
 
     def _resolve_local_source_dir(self, target_dir: Path) -> Optional[Path]:
         """Resolves local source plugins repository directory across configuration targets."""
-        # 1. Environment variable override
-        repo_env = os.environ.get("CASTER_PLUGINS_REPO")
-        if repo_env:
-            p = Path(repo_env).resolve()
-            cand = p if p.name == "plugins" else (p / "plugins")
-            if cand.is_dir() and cand.resolve() != target_dir.resolve():
-                return cand
-
-        # 2. Local registry path in settings.toml
-        try:
-            settings_path = resolve_caster_settings_path()
-            if settings_path.exists():
-                import tomlkit
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    doc = tomlkit.parse(f.read())
-                reg_path = doc.get("plugins_config", {}).get("local_registry_path")
-                if reg_path:
-                    cand = Path(reg_path).resolve().parent / "plugins"
-                    if cand.is_dir() and cand.resolve() != target_dir.resolve():
-                        return cand
-        except Exception:
-            pass
-
-        # 3. Registry scanner manifest path
-        try:
-            manifest_path = getattr(self._registry.scanner, "manifest_path", None)
-            if manifest_path and Path(manifest_path).exists():
-                cand = Path(manifest_path).resolve().parent / "plugins"
-                if cand.is_dir() and cand.resolve() != target_dir.resolve():
-                    return cand
-        except Exception:
-            pass
-
-        # 4. Standard developer workspace paths
-        for dev_cand in [
-            Path.home() / "Documents" / "repos" / "caster-plugins" / "plugins",
-            Path(__file__).resolve().parents[3] / "plugins",
-        ]:
-            if dev_cand.is_dir() and dev_cand.resolve() != target_dir.resolve():
-                return dev_cand.resolve()
-
-        return None
+        from ..core.sync import PluginSyncEngine
+        return PluginSyncEngine.resolve_local_source_dir(target_dir)
 
     def _on_update_from_local(self):
         """Synchronizes plugins from local development repository into live Caster user space."""

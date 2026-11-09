@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from plugins.plugin_manager.core.sync import PluginSyncEngine, compute_file_sha256
+from plugins.plugin_manager.core.sync import PluginSyncEngine
 
 
 class TestPluginSyncEngine(unittest.TestCase):
@@ -89,6 +89,71 @@ class TestPluginSyncEngine(unittest.TestCase):
         self.assertTrue(res["dry_run"])
         self.assertEqual(res["copied"], ["metadata.toml"])
         self.assertFalse((self.target_dir / "plugin_c").exists())
+
+    def test_resolve_local_source_dir_heuristics(self):
+        """Verifies repository discovery heuristics across environment and settings."""
+        import os
+        custom_repo = self.temp_path / "custom_repo" / "plugins"
+        custom_repo.mkdir(parents=True)
+
+        # 1. Environment variable override
+        old_env = os.environ.get("CASTER_PLUGINS_REPO")
+        try:
+            os.environ["CASTER_PLUGINS_REPO"] = str(custom_repo.parent)
+            resolved = PluginSyncEngine.resolve_local_source_dir(target_dir=self.target_dir)
+            self.assertEqual(resolved, custom_repo.resolve())
+        finally:
+            if old_env is not None:
+                os.environ["CASTER_PLUGINS_REPO"] = old_env
+            else:
+                os.environ.pop("CASTER_PLUGINS_REPO", None)
+
+        # 2. Target exclusion check (should not resolve to target_dir itself)
+        try:
+            os.environ["CASTER_PLUGINS_REPO"] = str(self.target_dir)
+            resolved_target = PluginSyncEngine.resolve_local_source_dir(target_dir=self.target_dir)
+            self.assertNotEqual(resolved_target, self.target_dir.resolve())
+        finally:
+            if old_env is not None:
+                os.environ["CASTER_PLUGINS_REPO"] = old_env
+            else:
+                os.environ.pop("CASTER_PLUGINS_REPO", None)
+
+    def test_discover_target_and_prune_orphaned_plugins(self):
+        """Verifies detection and pruning of plugins present in target but absent from source."""
+        # Source has plugin_live
+        p_src = self.source_dir / "plugin_live"
+        p_src.mkdir()
+        (p_src / "metadata.toml").write_text('name = "plugin_live"\n', encoding="utf-8")
+
+        # Target has plugin_live and orphaned plugin_dead
+        p_dst_live = self.target_dir / "plugin_live"
+        p_dst_live.mkdir()
+        (p_dst_live / "metadata.toml").write_text('name = "plugin_live"\n', encoding="utf-8")
+
+        p_dst_dead = self.target_dir / "plugin_dead"
+        p_dst_dead.mkdir()
+        (p_dst_dead / "metadata.toml").write_text('name = "plugin_dead"\n', encoding="utf-8")
+        (p_dst_dead / "plugin.py").write_text('# dead\n', encoding="utf-8")
+
+        engine = PluginSyncEngine(source_dir=self.source_dir, target_dir=self.target_dir)
+
+        target_plugins = engine.discover_target_plugins()
+        self.assertEqual(sorted(target_plugins), ["plugin_dead", "plugin_live"])
+
+        orphaned = engine.get_orphaned_plugins()
+        self.assertEqual(orphaned, ["plugin_dead"])
+
+        # Dry run
+        dry_pruned = engine.prune_orphaned_plugins(dry_run=True)
+        self.assertEqual(dry_pruned, ["plugin_dead"])
+        self.assertTrue((self.target_dir / "plugin_dead").exists())
+
+        # Actual prune
+        pruned = engine.prune_orphaned_plugins(dry_run=False)
+        self.assertEqual(pruned, ["plugin_dead"])
+        self.assertFalse((self.target_dir / "plugin_dead").exists())
+        self.assertTrue((self.target_dir / "plugin_live").exists())
 
 
 if __name__ == "__main__":

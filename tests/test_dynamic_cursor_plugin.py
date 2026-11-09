@@ -242,18 +242,14 @@ class TestDynamicCursorPluginLifecycle(unittest.TestCase):
         plugin.stop()
         self.assertFalse(plugin._running)
 
-    def test_printer_handler_dispatches_mic_state(self):
+    def test_printer_handler_ignores_system_messages(self):
         mock_bridge = MagicMock()
         handler = DynamicCursorPrintHandler(bridge=mock_bridge)
 
         handler.handle_message(["@ Caster: Microphone is sleeping"])
-        mock_bridge.update_mic_layer.assert_called_with("sleeping")
-
         handler.handle_message(["@ Caster: Microphone is on"])
-        mock_bridge.update_mic_layer.assert_called_with("on")
-
         handler.handle_message(["@ Microphone is off"])
-        mock_bridge.update_mic_layer.assert_called_with("off")
+        mock_bridge.update_mic_layer.assert_not_called()
 
 
 class TestPluginScannerMetadata(unittest.TestCase):

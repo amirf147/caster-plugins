@@ -49,6 +49,11 @@ def main():
         help="Perform synchronization, copying added and modified files.",
     )
     parser.add_argument(
+        "--clean-orphans",
+        action="store_true",
+        help="Remove target plugin directories that no longer exist in source repository.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview synchronization operations without modifying files on disk.",
@@ -87,6 +92,14 @@ def main():
         print()
 
     if args.sync:
+        if args.clean_orphans:
+            orphaned = engine.prune_orphaned_plugins(dry_run=args.dry_run)
+            mode_str = "[DRY RUN] " if args.dry_run else ""
+            if orphaned:
+                for name in orphaned:
+                    print(f"{mode_str}Pruned orphaned plugin directory: {name}")
+                print()
+
         plugins_to_sync = args.plugin if args.plugin else engine.discover_source_plugins()
         if not plugins_to_sync:
             print("No plugins found to synchronize.")

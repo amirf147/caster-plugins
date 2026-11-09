@@ -14,7 +14,10 @@ import tomlkit
 from plugins.plugin_manager.core.config_store import CasterTomlConfigStore
 from plugins.plugin_manager.core.options import OptionDefinition, OptionType
 from plugins.plugin_manager.core.registry import PluginRegistry
-from plugins.plugin_manager.core.storage import CasterTomlStateAdapter, resolve_caster_settings_path
+from plugins.plugin_manager.core.storage import (
+    CasterTomlStateAdapter,
+    SettingsTomlStore,
+)
 
 
 class TestCasterTomlStorage(unittest.TestCase):
@@ -220,6 +223,65 @@ max = 100
         fresh_records = fresh_registry.scan()
         self.assertTrue(fresh_records["sample_plugin"].enabled)
         self.assertEqual(fresh_registry.get_plugin_config("sample_plugin")["volume"], 75)
+
+    def test_shared_lock_across_instances(self):
+        """Verifies that all storage and config store adapters for a path share the identical RLock."""
+        store1 = SettingsTomlStore(file_path=self.settings_file)
+        store2 = SettingsTomlStore(file_path=self.settings_file)
+        adapter = CasterTomlStateAdapter(file_path=self.settings_file)
+        config = CasterTomlConfigStore(file_path=self.settings_file)
+
+        self.assertIs(store1._lock, store2._lock)
+        self.assertIs(store1._lock, adapter._lock)
+        self.assertIs(store1._lock, config._lock)
+
+    def test_table_and_scalar_format_consistency_no_corruption(self):
+        """Verifies that save_state and config operations never corrupt tables or scalar booleans."""
+        initial_content = """[plugins]
+taskbar_hud = true
+
+[plugins.themed_hud]
+enabled = true
+theme = "frosted-dark"
+opacity = 0.8
+"""
+        self.settings_file.write_text(initial_content, encoding="utf-8")
+        store = SettingsTomlStore(file_path=self.settings_file)
+
+        defs = {
+            "theme": OptionDefinition("theme", OptionType.CHOICE, default="classic", choices=["classic", "frosted-dark"]),
+            "opacity": OptionDefinition("opacity", OptionType.FLOAT, default=1.0, min_value=0.1, max_value=1.0),
+        }
+
+        # 1. State save must preserve table and option values
+        store.save_state({"taskbar_hud": False, "themed_hud": True})
+        doc = tomlkit.parse(self.settings_file.read_text(encoding="utf-8"))
+        self.assertIs(doc["plugins"]["taskbar_hud"], False)
+        self.assertEqual(doc["plugins"]["themed_hud"]["theme"], "frosted-dark")
+        self.assertEqual(doc["plugins"]["themed_hud"]["opacity"], 0.8)
+        self.assertIs(doc["plugins"]["themed_hud"]["enabled"], True)
+
+        # 2. Reset config must remove options but preserve enabled state in table
+        store.reset_plugin_config("themed_hud", defs)
+        doc2 = tomlkit.parse(self.settings_file.read_text(encoding="utf-8"))
+        self.assertIs(doc2["plugins"]["themed_hud"]["enabled"], True)
+        self.assertNotIn("theme", doc2["plugins"]["themed_hud"])
+        self.assertNotIn("opacity", doc2["plugins"]["themed_hud"])
+
+        # 3. Setting config on scalar boolean must convert to table preserving enabled value
+        taskbar_defs = {
+            "position": OptionDefinition("position", OptionType.STRING, default="top"),
+        }
+        store.set_plugin_config("taskbar_hud", {"position": "bottom"}, taskbar_defs)
+        doc3 = tomlkit.parse(self.settings_file.read_text(encoding="utf-8"))
+        self.assertIs(doc3["plugins"]["taskbar_hud"]["enabled"], False)
+        self.assertEqual(doc3["plugins"]["taskbar_hud"]["position"], "bottom")
+
+    def test_registry_default_uses_single_unified_store(self):
+        """Verifies that default PluginRegistry shares a single SettingsTomlStore for storage and options."""
+        registry = PluginRegistry()
+        self.assertIs(registry.storage, registry.config_store)
+        self.assertIsInstance(registry.storage, SettingsTomlStore)
 
 
 if __name__ == "__main__":

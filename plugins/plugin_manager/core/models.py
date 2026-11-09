@@ -54,6 +54,7 @@ class PluginRecord:
     health: PluginHealthState = PluginHealthState.READY
     missing_dependencies: List[str] = field(default_factory=list)
     diagnostic_message: Optional[str] = None
+    is_running: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes record to a plain dictionary for UI presentation or IPC transmission."""
@@ -69,6 +70,7 @@ class PluginRecord:
             "plugin_dir": str(self.metadata.plugin_dir) if self.metadata.plugin_dir else None,
             "options": {k: opt.to_dict() for k, opt in self.metadata.options.items()},
             "enabled": self.enabled,
+            "is_running": self.is_running,
             "health": self.health.value,
             "missing_dependencies": list(self.missing_dependencies),
             "diagnostic_message": self.diagnostic_message,

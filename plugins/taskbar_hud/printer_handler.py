@@ -9,16 +9,22 @@ and pushes recognition telemetry to TaskbarHudBridgeClient.
 """
 
 import logging
-from castervoice.lib import printer
+
+try:
+    from castervoice.lib import printer
+    BaseMessageHandler = printer.BaseMessageHandler
+except ImportError:
+    class BaseMessageHandler(object):
+        pass
 
 _logger = logging.getLogger("caster.plugins.taskbar_hud.printer_handler")
 
 _MIC_COMMAND_FILTER = {"caster sleep", "caster on", "caster off", "sleep", "wake up", "stop listening"}
 
 
-class TaskbarHudPrintHandler(printer.BaseMessageHandler):
+class TaskbarHudPrintHandler(BaseMessageHandler):
     """
-    Message handler dispatching recognized commands to Taskbar HUD.
+    Message handler dispatching recognized commands and rejections to Taskbar HUD.
     """
 
     def __init__(self, bridge=None):
@@ -26,9 +32,11 @@ class TaskbarHudPrintHandler(printer.BaseMessageHandler):
         self._bridge = bridge
 
     def set_bridge(self, bridge):
+        """Assigns the active bridge client instance."""
         self._bridge = bridge
 
     def handle_message(self, items):
+        """Processes printer stream items for recognized commands and engine rejections."""
         if not self._bridge:
             try:
                 from .bridge import get_taskbar_hud_bridge
@@ -67,18 +75,7 @@ class TaskbarHudPrintHandler(printer.BaseMessageHandler):
 
                 self._bridge.send_update(command=cmd, status="recognized")
 
-            # 2. System / Status messages (@)
-            elif raw.startswith("@"):
-                sys_msg = raw[1:].strip()
-                sys_low = sys_msg.lower()
-                if "sleeping" in sys_low:
-                    self._bridge.send_update(command="Sleeping", status="sleeping", mic_state="sleeping")
-                elif "ready" in sys_low or "microphone is on" in sys_low:
-                    self._bridge.send_update(command="Ready", status="idle", mic_state="on")
-                else:
-                    self._bridge.send_update(command=sys_msg, status="idle")
-
-            # 3. Error / rejection messages (#)
+            # 2. Error / rejection messages (#)
             elif raw.startswith("#"):
                 err_msg = raw[1:].strip()
                 if "reject" in err_msg.lower() or "unrec" in err_msg.lower():

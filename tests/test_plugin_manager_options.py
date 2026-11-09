@@ -148,21 +148,20 @@ class TestPluginConfigStore(unittest.TestCase):
 class TestScannerOptionsParsing(unittest.TestCase):
     """Tests that filesystem scanner extracts options from metadata.toml."""
 
-    def test_scanner_extracts_themed_hud_options(self):
+    def test_scanner_extracts_dynamic_cursor_options(self):
         scanner = PluginScanner()
         records = scanner.scan_all()
-        self.assertIn("themed_hud", records)
+        self.assertIn("dynamic_cursor", records)
 
-        themed_hud = records["themed_hud"]
-        options = themed_hud.metadata.options
-        self.assertIn("theme", options)
-        self.assertIn("opacity", options)
-        self.assertIn("status_border", options)
-        self.assertIn("port", options)
+        dynamic_cursor = records["dynamic_cursor"]
+        options = dynamic_cursor.metadata.options
+        self.assertIn("pipe_name", options)
+        self.assertIn("autostart_daemon", options)
+        self.assertIn("enable_mic_tint", options)
+        self.assertIn("listening_tint", options)
 
-        self.assertEqual(options["theme"].option_type, OptionType.CHOICE)
-        self.assertEqual(options["opacity"].option_type, OptionType.FLOAT)
-        self.assertEqual(options["port"].option_type, OptionType.INT)
+        self.assertEqual(options["pipe_name"].option_type, OptionType.STRING)
+        self.assertEqual(options["autostart_daemon"].option_type, OptionType.BOOL)
 
 
 @unittest.skipUnless(HAS_QT, "Qt not available in environment")
@@ -188,15 +187,15 @@ class TestSettingsFormGui(unittest.TestCase):
     def test_settings_form_generation_and_saving(self):
         form = SettingsFormWidget(config_store=self.config_store)
         records = self.registry.scan()
-        themed_rec = records.get("themed_hud")
-        self.assertIsNotNone(themed_rec)
+        cursor_rec = records.get("dynamic_cursor")
+        self.assertIsNotNone(cursor_rec)
 
-        form.set_plugin(themed_rec)
+        form.set_plugin(cursor_rec)
 
         # Verify controls generated for all options
-        self.assertIn("theme", form._controls)
-        self.assertIn("opacity", form._controls)
-        self.assertIn("status_border", form._controls)
+        self.assertIn("pipe_name", form._controls)
+        self.assertIn("autostart_daemon", form._controls)
+        self.assertIn("enable_mic_tint", form._controls)
 
         # Trigger save
         saved_events = []
@@ -204,8 +203,8 @@ class TestSettingsFormGui(unittest.TestCase):
         form._on_save_clicked()
 
         self.assertEqual(len(saved_events), 1)
-        self.assertEqual(saved_events[0][0], "themed_hud")
-        self.assertIn("theme", saved_events[0][1])
+        self.assertEqual(saved_events[0][0], "dynamic_cursor")
+        self.assertIn("pipe_name", saved_events[0][1])
 
     def test_window_tab_switching_and_count(self):
         window = PluginManagerWindow(registry=self.registry)

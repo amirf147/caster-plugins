@@ -4,41 +4,34 @@
 """
 Dynamic Cursor Named Pipe Bridge Client.
 
-Maintains an asynchronous worker thread and bounded queue for dispatching
-length-prefixed JSON visual layer frames to the native Dynamic Cursor daemon.
+Maintains visual layer states and dispatches length-prefixed JSON frames
+to the native Dynamic Cursor daemon using the shared NamedPipeTransport.
 """
 
-import ctypes
-from ctypes import wintypes
-import json
 import logging
-import queue
-import struct
-import sys
 import threading
-import time
-from typing import Optional
+from typing import List, Optional
+
+try:
+    from plugins.common.named_pipe import LengthPrefixedFraming, NamedPipeTransport
+except ImportError:
+    try:
+        from ..common.named_pipe import LengthPrefixedFraming, NamedPipeTransport
+    except ImportError:
+        from caster_user_content.plugins.common.named_pipe import (
+            LengthPrefixedFraming,
+            NamedPipeTransport,
+        )
 
 _logger = logging.getLogger("caster.plugins.dynamic_cursor.bridge")
-
-GENERIC_WRITE = 0x40000000
-OPEN_EXISTING = 3
-FILE_ATTRIBUTE_NORMAL = 0x80
-
-if sys.platform == "win32":
-    _kernel32 = ctypes.windll.kernel32
-    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-else:
-    _kernel32 = None
-    INVALID_HANDLE_VALUE = -1
 
 _SENTINEL = object()
 
 
-class DynamicCursorBridgeClient:
+class DynamicCursorBridgeClient(object):
     """
-    Singleton client maintaining an asynchronous queue and background worker
-    for pushing length-prefixed JSON frames to \\\\.\\pipe\\<pipe_name>.
+    Bridge client dispatching length-prefixed visual layer frames
+    to the native Dynamic Cursor daemon via Named Pipe IPC.
     """
 
     _instance = None
@@ -54,21 +47,24 @@ class DynamicCursorBridgeClient:
         muted_tint: str = "#888888",
     ):
         self._pipe_name = pipe_name
-        self._pipe_path = f"\\\\.\\pipe\\{pipe_name}"
         self._enable_mic_tint = bool(enable_mic_tint)
         self._enable_context_badges = bool(enable_context_badges)
         self._listening_tint = str(listening_tint)
         self._sleeping_tint = str(sleeping_tint)
         self._muted_tint = str(muted_tint)
 
-        self._queue = queue.Queue(maxsize=128)
-        self._running = False
-        self._worker_thread = None
-
         self._last_sent_mic_payload = None
         self._last_sent_badge_id = _SENTINEL
         self._cached_mic_payload = None
         self._cached_context_payload = None
+
+        self._transport = NamedPipeTransport(
+            pipe_name=pipe_name,
+            framing=LengthPrefixedFraming(),
+            replay_provider=self._get_replay_payloads,
+            on_stop_payload={"op": "clear"},
+        )
+        self._queue = self._transport.queue
 
     @classmethod
     def get_instance(
@@ -86,41 +82,40 @@ class DynamicCursorBridgeClient:
     @staticmethod
     def encode_frame(payload: dict) -> bytes:
         """Serializes dictionary payload to length-prefixed UTF-8 JSON bytes."""
-        utf8_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        prefix = struct.pack("<I", len(utf8_bytes))
-        return prefix + utf8_bytes
+        return LengthPrefixedFraming().encode(payload)
 
-    def start(self):
-        """Starts the background worker thread for Named Pipe transmission."""
+    @property
+    def is_running(self) -> bool:
+        """Indicates whether the transport sender loop is running."""
+        return self._transport.is_running
+
+    def start(self) -> None:
+        """Starts the transport background worker thread."""
+        self._transport.start()
+
+    def stop(self) -> None:
+        """Dispatches a clear frame and stops the transport worker thread."""
+        self._enqueue({"op": "clear"})
+        self._transport.stop()
+
+    def clear_layers(self) -> None:
+        """Resets cached layers and dispatches a clear operation."""
         with self._lock:
-            if self._running:
-                return
-            self._running = True
-            self._worker_thread = threading.Thread(
-                target=self._sender_loop,
-                name="DynamicCursor-NamedPipe-Worker",
-                daemon=True,
-            )
-            self._worker_thread.start()
-
-    def stop(self):
-        """Stops the worker thread and dispatches a clear operation."""
-        with self._lock:
-            was_running = self._running
-            self._running = False
-
+            self._last_sent_mic_payload = None
+            self._last_sent_badge_id = _SENTINEL
+            self._cached_mic_payload = None
+            self._cached_context_payload = None
         self._enqueue({"op": "clear"})
 
-        if was_running and self._worker_thread and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=1.0)
-            self._worker_thread = None
+    def flush(self, timeout: float = 1.0) -> bool:
+        """Flushes queued frames to the native cursor daemon."""
+        return self._transport.flush(timeout=timeout)
 
     def update_mic_layer(self, mic_state: str) -> None:
         """
-        Updates the primary cursor body tint layer according to mic mode.
+        Updates cursor tint layer based on microphone state.
 
-        Deduplicates against the last sent payload and maintains cached state
-        for automatic reconnection replay.
+        Deduplicates against the last sent payload and caches state for replay.
         """
         norm_state = str(mic_state or "").strip().lower()
 
@@ -166,10 +161,9 @@ class DynamicCursorBridgeClient:
 
     def update_context_layer(self, badge_id: Optional[str]) -> None:
         """
-        Updates the secondary corner badge layer according to focus context.
+        Updates context badge layer based on active focus zone.
 
-        Deduplicates against the last sent badge identifier and dispatches
-        removal when badge_id is None or badges are disabled.
+        Deduplicates against the last sent badge identifier and caches state for replay.
         """
         with self._lock:
             if badge_id == self._last_sent_badge_id:
@@ -190,107 +184,18 @@ class DynamicCursorBridgeClient:
         self._enqueue(payload)
 
     def _enqueue(self, payload: dict) -> None:
-        """Enqueues a payload frame with bounded drop-oldest overflow handling."""
-        try:
-            self._queue.put_nowait(payload)
-        except queue.Full:
-            try:
-                _ = self._queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._queue.put_nowait(payload)
-            except queue.Full:
-                pass
+        """Enqueues payload for transmission via the underlying transport."""
+        self._transport.send(payload)
 
-    def _sender_loop(self):
-        """Worker loop managing connection lifecycle and frame writing."""
-        handle = INVALID_HANDLE_VALUE
-        pending_frame = None
-
-        while self._running:
-            if pending_frame is None:
-                try:
-                    payload = self._queue.get(timeout=0.25)
-                except queue.Empty:
-                    continue
-                pending_frame = self.encode_frame(payload)
-
-            if _kernel32 is None:
-                pending_frame = None
-                continue
-
-            if handle == INVALID_HANDLE_VALUE or handle == 0 or handle is None:
-                handle = _kernel32.CreateFileW(
-                    self._pipe_path,
-                    GENERIC_WRITE,
-                    0,
-                    None,
-                    OPEN_EXISTING,
-                    0,
-                    None,
-                )
-                if handle == INVALID_HANDLE_VALUE or handle == 0 or handle is None:
-                    handle = INVALID_HANDLE_VALUE
-                    time.sleep(0.1)
-                    continue
-
-                self._replay_cached_states(handle)
-
-            if not self._write_raw_bytes(handle, pending_frame):
-                _kernel32.CloseHandle(handle)
-                handle = INVALID_HANDLE_VALUE
-                time.sleep(0.1)
-            else:
-                _kernel32.FlushFileBuffers(handle)
-                pending_frame = None
-
-        if _kernel32 and handle != INVALID_HANDLE_VALUE and handle != 0 and handle is not None:
-            try:
-                clear_frame = self.encode_frame({"op": "clear"})
-                self._write_raw_bytes(handle, clear_frame)
-                _kernel32.FlushFileBuffers(handle)
-            except Exception:
-                pass
-            finally:
-                _kernel32.CloseHandle(handle)
-
-    def _replay_cached_states(self, handle) -> None:
-        """Replays current mic and context state layers on new connection."""
+    def _get_replay_payloads(self) -> List[dict]:
+        """Provides snapshot of active layers for transport replay on connect."""
         replays = []
         with self._lock:
             if self._cached_mic_payload is not None:
                 replays.append(self._cached_mic_payload)
             if self._cached_context_payload is not None:
                 replays.append(self._cached_context_payload)
-
-        for payload in replays:
-            frame = self.encode_frame(payload)
-            if not self._write_raw_bytes(handle, frame):
-                break
-
-    def _write_raw_bytes(self, handle, data: bytes) -> bool:
-        """Writes buffer bytes to the open pipe handle."""
-        if not _kernel32 or handle == INVALID_HANDLE_VALUE or handle == 0 or handle is None:
-            return False
-
-        total = 0
-        length = len(data)
-        while total < length:
-            chunk = data[total:]
-            to_write = len(chunk)
-            written = wintypes.DWORD(0)
-            ok = _kernel32.WriteFile(
-                handle,
-                chunk,
-                to_write,
-                ctypes.byref(written),
-                None,
-            )
-            if not ok or written.value == 0:
-                return False
-            total += written.value
-        return True
+        return replays
 
 
 def get_dynamic_cursor_bridge(

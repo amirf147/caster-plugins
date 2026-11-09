@@ -4,83 +4,58 @@
 """
 Context-to-Badge Mapper for Dynamic Cursor.
 
-Pure deterministic mapping from active application process names and ADCE
-sub-window semantic zones to procedural corner badge identifiers.
+Pure deterministic mapping from active application process names and canonical
+semantic focus zones to procedural corner badge identifiers.
 """
 
 import os
 from typing import Optional
 
-BROWSER_PROCESS_NAMES = {
-    "waterfox",
-    "firefox",
-    "chrome",
-    "msedge",
-    "brave",
-    "vivaldi",
-    "arc",
-    "opera",
-    "tor",
-}
+try:
+    from plugins.common.desktop_context import (
+        BROWSER_PROCESS_NAMES,
+        IDE_PROCESS_NAMES,
+        TERMINAL_PROCESS_NAMES,
+        WRITING_PROCESS_NAMES,
+        SemanticZone,
+        canonicalize_zone,
+    )
+except ImportError:
+    try:
+        from ..common.desktop_context import (
+            BROWSER_PROCESS_NAMES,
+            IDE_PROCESS_NAMES,
+            TERMINAL_PROCESS_NAMES,
+            WRITING_PROCESS_NAMES,
+            SemanticZone,
+            canonicalize_zone,
+        )
+    except ImportError:
+        from enum import Enum
 
-IDE_PROCESS_NAMES = {
-    "antigravity",
-    "antigravity ide",
-    "code",
-    "code - oss",
-    "vscodium",
-    "cursor",
-    "windsurf",
-    "devenv",
-    "pycharm64",
-    "idea64",
-    "clion64",
-    "rider64",
-    "nvim",
-    "vim",
-    "sublime_text",
-    "zed",
-}
+        class SemanticZone(str, Enum):
+            EDITOR = "editor"
+            TERMINAL = "terminal"
+            DOCUMENT = "document"
+            WEB = "web"
+            CHAT = "chat"
+            UNKNOWN = "unknown"
 
-TERMINAL_PROCESS_NAMES = {
-    "windowsterminal",
-    "wt",
-    "pwsh",
-    "powershell",
-    "cmd",
-    "alacritty",
-    "wezterm-gui",
-    "wezterm",
-    "mintty",
-    "conhost",
-    "git-bash",
-}
+        def canonicalize_zone(raw):
+            return str(raw or "").lower()
 
-WRITING_PROCESS_NAMES = {
-    "notepad",
-    "winword",
-    "obsidian",
-    "notion",
-    "wordpad",
-    "typora",
-    "soffice.bin",
-    "libreoffice",
-    "scrivener",
-    "logseq",
-}
+        BROWSER_PROCESS_NAMES = frozenset(["firefox", "chrome", "msedge", "waterfox"])
+        IDE_PROCESS_NAMES = frozenset(["code", "cursor", "antigravity"])
+        TERMINAL_PROCESS_NAMES = frozenset(["windowsterminal", "pwsh", "cmd"])
+        WRITING_PROCESS_NAMES = frozenset(["notepad", "winword", "obsidian"])
 
-_TERMINAL_ZONES = {"terminal", "integratedterminal", "2"}
-_WEB_ZONES = {"webdocument", "documentcontent", "addressbar", "5", "6"}
-_WRITING_ZONES = {
-    "chatprompt",
-    "chatconversation",
-    "chatassistant",
-    "gitcommitbox",
-    "3",
-    "11",
-    "18",
-}
-_EDITOR_ZONES = {"editorbuffer", "editorcodebuffer", "1"}
+__all__ = [
+    "BROWSER_PROCESS_NAMES",
+    "IDE_PROCESS_NAMES",
+    "TERMINAL_PROCESS_NAMES",
+    "WRITING_PROCESS_NAMES",
+    "resolve_context_badge",
+]
 
 
 def resolve_context_badge(
@@ -91,26 +66,26 @@ def resolve_context_badge(
     """
     Resolves the appropriate corner badge identifier for the active context.
 
-    Evaluates sub-window semantic focus zone first. Falls back to application
-    process name classification when zone is unassigned or generic.
+    Evaluates sub-window semantic focus zone first using canonical SemanticZone.
+    Falls back to application process name classification when zone is unassigned or generic.
     """
     proc = os.path.basename(str(process_name or "").strip()).lower()
     if proc.endswith(".exe"):
         proc = proc[:-4]
 
-    norm_zone = str(semantic_zone or "").strip().lower().replace("_", "").replace(" ", "")
+    canon_zone = canonicalize_zone(semantic_zone)
 
-    # Stage 1: Sub-window semantic zone priority
-    if norm_zone in _TERMINAL_ZONES:
+    # Stage 1: Sub-window canonical semantic zone priority
+    if canon_zone == SemanticZone.TERMINAL:
         return "terminal_prompt"
 
-    if norm_zone in _WEB_ZONES:
+    if canon_zone == SemanticZone.WEB:
         return "web_globe"
 
-    if norm_zone in _WRITING_ZONES:
+    if canon_zone in (SemanticZone.DOCUMENT, SemanticZone.CHAT):
         return "doc_writing"
 
-    if norm_zone in _EDITOR_ZONES:
+    if canon_zone == SemanticZone.EDITOR:
         if proc in WRITING_PROCESS_NAMES:
             return "doc_writing"
         if proc in BROWSER_PROCESS_NAMES:

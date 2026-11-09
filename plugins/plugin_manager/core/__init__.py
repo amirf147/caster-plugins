@@ -5,15 +5,22 @@
 Core headless registry engine, models, scanner, validator, and storage adapters.
 """
 
-from .config_store import PluginConfigStore
+from .config_store import CasterTomlConfigStore, PluginConfigStore
 from .models import PluginHealthState, PluginMetadata, PluginRecord
 from .options import OptionDefinition, OptionType, validate_and_coerce
 from .registry import PluginRegistry
 from .scanner import PluginScanner
-from .storage import LocalJsonStateAdapter, StateStorageAdapter
+from .storage import (
+    CasterTomlStateAdapter,
+    LocalJsonStateAdapter,
+    SettingsTomlStore,
+    StateStorageAdapter,
+)
 from .validator import PluginValidator
 
 __all__ = [
+    "CasterTomlConfigStore",
+    "CasterTomlStateAdapter",
     "LocalJsonStateAdapter",
     "OptionDefinition",
     "OptionType",
@@ -24,6 +31,7 @@ __all__ = [
     "PluginRegistry",
     "PluginScanner",
     "PluginValidator",
+    "SettingsTomlStore",
     "StateStorageAdapter",
     "validate_and_coerce",
 ]

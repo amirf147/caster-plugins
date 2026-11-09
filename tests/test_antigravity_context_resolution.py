@@ -3,13 +3,10 @@ Integration test suite verifying precision context candidate resolution and
 rules.toml authoritative active rule filtering in Caster HUD.
 """
 
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
-from dragonfly import Grammar, MappingRule, get_current_engine
-from castervoice.lib.ctrl.mgr.rule_details import RuleDetails
+from dragonfly import Grammar
 from castervoice.lib.ctrl.mgr.rule_maker.mapping_rule_maker import MappingRuleMaker
 try:
     from castervoice.asynch.hud_support import (

@@ -132,13 +132,13 @@ class TestPluginManagerGui(unittest.TestCase):
         self.assertGreaterEqual(list_widget.count(), 4)
 
         # Test search filter
-        window._search_input.setText("themed")
+        window._search_input.setText("taskbar")
         self.assertEqual(list_widget.count(), 1)
         first_item = list_widget.item(0)
-        self.assertEqual(first_item.data(QtCore.Qt.UserRole), "themed_hud")
+        self.assertEqual(first_item.data(QtCore.Qt.UserRole), "taskbar_hud")
 
         # Test detail pane updated on selection
-        self.assertEqual(window._detail_pane._title_label.text(), "themed_hud")
+        self.assertEqual(window._detail_pane._title_label.text(), "taskbar_hud")
 
         # Clear filter
         window._search_input.setText("")
@@ -147,16 +147,16 @@ class TestPluginManagerGui(unittest.TestCase):
     def test_window_toggle_persists_state(self):
         window = PluginManagerWindow(registry=self.registry)
 
-        # Trigger toggle on themed_hud
-        window._on_plugin_toggled("themed_hud", True)
+        # Trigger toggle on taskbar_hud
+        window._on_plugin_toggled("taskbar_hud", True)
 
         # Check in memory and on disk
-        rec = self.registry.get_plugin("themed_hud")
+        rec = self.registry.get_plugin("taskbar_hud")
         self.assertIsNotNone(rec)
         self.assertTrue(rec.enabled)
 
         disk_state = self.storage.load_state()
-        self.assertTrue(disk_state.get("themed_hud"))
+        self.assertTrue(disk_state.get("taskbar_hud"))
 
         # Verify footer updated
         self.assertIn("Enabled: 1", window._footer_label.text())
@@ -168,6 +168,40 @@ class TestPluginManagerGui(unittest.TestCase):
         # Test Escape key closes window
         QTest.keyClick(window, QtCore.Qt.Key_Escape)
         self.assertFalse(window.isVisible())
+
+    def test_window_runtime_ipc_wiring(self):
+        """Verifies IPC running plugins update record.is_running and GUI indicators."""
+        from unittest.mock import MagicMock
+        mock_ipc = MagicMock()
+        mock_ipc.is_connected.return_value = True
+        mock_ipc.get_running_plugins.return_value = {"taskbar_hud"}
+
+        window = PluginManagerWindow(registry=self.registry, ipc_client=mock_ipc)
+
+        rec = window._all_records.get("taskbar_hud")
+        self.assertIsNotNone(rec)
+        self.assertTrue(rec.is_running)
+
+        row_widget = window._row_widgets.get("taskbar_hud")
+        self.assertIsNotNone(row_widget)
+        self.assertEqual(row_widget._badge.text().strip(), "RUNNING")
+
+        self.assertIn("Running: 1", window._footer_label.text())
+
+    def test_window_config_saved_triggers_reload(self):
+        """Verifies settings_form config_saved signal dispatches reload_plugin via IPC."""
+        from unittest.mock import MagicMock
+        mock_ipc = MagicMock()
+        mock_ipc.is_connected.return_value = True
+        mock_ipc.get_running_plugins.return_value = {"taskbar_hud"}
+        mock_ipc.reload_plugin.return_value = (True, "Reloaded")
+
+        window = PluginManagerWindow(registry=self.registry, ipc_client=mock_ipc)
+        window._registry.set_enabled("taskbar_hud", True)
+        window._all_records["taskbar_hud"].enabled = True
+
+        window._settings_form.config_saved.emit("taskbar_hud", {"theme": "dark"})
+        mock_ipc.reload_plugin.assert_called_once_with("taskbar_hud")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,13 @@ from typing import Optional
 _logger = logging.getLogger("caster.plugins.plugin_manager.runner_bridge")
 
 _active_process: Optional[subprocess.Popen] = None
+_refresh_callback = None
+
+
+def set_refresh_callback(callback):
+    """Registers an optional in-process callback invoked during refresh_manager."""
+    global _refresh_callback
+    _refresh_callback = callback
 
 
 def get_active_process() -> Optional[subprocess.Popen]:
@@ -93,12 +100,20 @@ def open_manager_process() -> subprocess.Popen:
         except Exception:
             out_fh = None
 
-    proc = subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=out_fh or subprocess.DEVNULL,
-        stderr=subprocess.STDOUT if out_fh else subprocess.DEVNULL,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=out_fh or subprocess.DEVNULL,
+            stderr=subprocess.STDOUT if out_fh else subprocess.DEVNULL,
+        )
+    finally:
+        if out_fh:
+            try:
+                out_fh.close()
+            except Exception:
+                pass
+
     _active_process = proc
     return proc
 
@@ -125,10 +140,36 @@ def close_manager() -> bool:
     return False
 
 
+def trigger_window_refresh(window_title: str = "Caster Plugin Manager") -> bool:
+    """Sends a refresh keypress (F5) to the active window using Win32 API."""
+    if sys.platform != "win32":
+        return False
+
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_title)
+        if hwnd:
+            wm_keydown = 0x0100
+            wm_keyup = 0x0101
+            vk_f5 = 0x73
+            user32.PostMessageW(hwnd, wm_keydown, vk_f5, 0)
+            user32.PostMessageW(hwnd, wm_keyup, vk_f5, 0)
+            return True
+    except Exception as ex:
+        _logger.debug("Failed to post refresh key event to window '%s': %s", window_title, ex)
+    return False
+
+
 def refresh_manager() -> bool:
-    """Signals or focuses the active manager window to trigger a refresh."""
+    """Signals or focuses the active manager window and triggers a refresh."""
     active = get_active_process()
     if active is not None:
         bring_window_to_front()
+        trigger_window_refresh()
+        if _refresh_callback is not None:
+            try:
+                _refresh_callback()
+            except Exception as ex:
+                _logger.debug("In-process refresh callback failed: %s", ex)
         return True
     return False

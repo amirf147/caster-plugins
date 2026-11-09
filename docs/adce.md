@@ -76,7 +76,7 @@ startup_cwd = ""
 1. **When `enabled = false`**:
    - On Caster startup, the plugin loader ignores `adce`.
    - No background SSE connection is established, and no background daemon is auto-spawned.
-   - Other plugins (such as `taskbar_hud` or `themed_hud`) fall back to standard Win32 foreground window polling.
+   - Other plugins (such as `taskbar_hud` or `dynamic_cursor`) fall back to standard Win32 foreground window polling.
 
 2. **When re-enabling (`enabled = true` or `plugin_cli enable adce`)**:
    - The CLI or configuration file sets `enabled = true` in `settings.toml`.

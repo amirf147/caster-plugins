@@ -8,17 +8,13 @@ Verifies dynamic AST parsing, multi-tiered path discovery, and rules.toml synchr
 
 import unittest
 
-from plugins.taskbar_hud.context_resolver import (
+from plugins.common.context_resolver import (
     RuleCatalog,
     format_display_name,
     normalize_process_name,
-    resolve_active_rules as taskbar_resolve,
     resolve_caster_user_dir,
     resolve_rule_search_dirs,
     resolve_rules_config_path,
-)
-from plugins.themed_hud.context_resolver import (
-    resolve_active_rules as themed_resolve,
 )
 
 
@@ -66,16 +62,6 @@ class TestContextResolver(unittest.TestCase):
         # Empty context returns empty list
         self.assertEqual(catalog.resolve(process_name="", window_title=""), [])
         self.assertEqual(catalog.resolve(process_name=None, window_title=None), [])
-
-    def test_parity_between_taskbar_and_themed_hud(self):
-        """Verifies both taskbar_hud and themed_hud resolvers produce identical output."""
-        procs = ["code.exe", "waterfox.exe", "explorer.exe", "windowsterminal.exe"]
-        titles = ["main.py", "Google Gemini", "Downloads", "Windows PowerShell"]
-
-        for proc, title in zip(procs, titles):
-            t_res = taskbar_resolve(process_name=proc, window_title=title)
-            th_res = themed_resolve(process_name=proc, window_title=title)
-            self.assertEqual(t_res, th_res, f"Mismatch for proc={proc}, title={title}")
 
     def test_antigravity_vs_powershell_isolation(self):
         """Verifies Antigravity IDE does not falsely match PowerShell rules when ADCE is offline."""

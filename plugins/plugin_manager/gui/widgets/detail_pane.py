@@ -88,6 +88,10 @@ class DetailPane(QtWidgets.QFrame):
         self._path_val.setWordWrap(True)
         form_layout.addRow("<b>Path:</b>", self._path_val)
 
+        self._runtime_val = QtWidgets.QLabel(self)
+        self._runtime_val.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        form_layout.addRow("<b>Runtime:</b>", self._runtime_val)
+
         layout.addLayout(form_layout)
 
         # Diagnostic Alert Box
@@ -142,6 +146,16 @@ class DetailPane(QtWidgets.QFrame):
         self._entry_val.setText(meta.entry_point or "None")
         self._path_val.setText(str(meta.plugin_dir) if meta.plugin_dir else "N/A")
 
+        if getattr(record, "is_running", False):
+            self._runtime_val.setText("Active (Executing in Caster)")
+            self._runtime_val.setStyleSheet("color: #4ade80; font-weight: bold;")
+        elif record.enabled:
+            self._runtime_val.setText("Enabled (Pending start or idle)")
+            self._runtime_val.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+        else:
+            self._runtime_val.setText("Disabled")
+            self._runtime_val.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
+
         if record.diagnostic_message:
             self._diag_text.setText(record.diagnostic_message)
             self._diag_frame.show()
@@ -160,6 +174,7 @@ class DetailPane(QtWidgets.QFrame):
         self._deps_val.setText("-")
         self._entry_val.setText("-")
         self._path_val.setText("-")
+        self._runtime_val.setText("-")
         self._diag_frame.hide()
         self._open_dir_btn.setEnabled(False)
 

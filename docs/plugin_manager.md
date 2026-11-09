@@ -23,7 +23,7 @@ The subsystem consists of three decoupled layers:
 
 3. **Subprocess Dispatcher & Voice Integration**:
    - `runner_bridge.py`: Non-blocking subprocess launcher with Win32 single-instance focus handling.
-   - `plugin_manager_rule.py`: Companion Dragonfly voice rules exposing direct voice controls.
+   - `rules.py`: Companion Dragonfly voice rules exposing direct voice controls.
 
 ---
 

@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 _logger = logging.getLogger("caster.plugins.plugin_manager.sync")
 
@@ -76,17 +76,71 @@ class PluginSyncEngine:
         source_dir: Optional[Union[str, Path]] = None,
         target_dir: Optional[Union[str, Path]] = None,
     ):
-        if source_dir is None:
-            # Default to repo plugins directory relative to this core package
-            current_file = Path(__file__).resolve()
-            self._source_dir = current_file.parents[2]
-        else:
-            self._source_dir = Path(source_dir).resolve()
-
         if target_dir is None:
             self._target_dir = resolve_default_target_dir()
         else:
             self._target_dir = Path(target_dir).resolve()
+
+        if source_dir is None:
+            resolved = self.resolve_local_source_dir(target_dir=self._target_dir)
+            if resolved is not None:
+                self._source_dir = resolved
+            else:
+                current_file = Path(__file__).resolve()
+                self._source_dir = current_file.parents[2]
+        else:
+            self._source_dir = Path(source_dir).resolve()
+
+    @classmethod
+    def resolve_local_source_dir(cls, target_dir: Optional[Union[str, Path]] = None) -> Optional[Path]:
+        """
+        Resolves local source plugins repository directory across environment variables,
+        settings.toml configuration, manifest location, and workspace paths.
+        Avoids returning the target user directory itself.
+        """
+        target = Path(target_dir).resolve() if target_dir is not None else resolve_default_target_dir()
+
+        # 1. Environment variable override
+        repo_env = os.environ.get("CASTER_PLUGINS_REPO")
+        if repo_env:
+            p = Path(repo_env).resolve()
+            cand = p if p.name == "plugins" else (p / "plugins")
+            if cand.is_dir() and cand.resolve() != target:
+                return cand.resolve()
+
+        # 2. Local registry path in settings.toml
+        try:
+            from .storage import resolve_caster_settings_path
+            settings_path = resolve_caster_settings_path()
+            if settings_path.exists():
+                import tomlkit
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    doc = tomlkit.parse(f.read())
+                reg_path = doc.get("plugins_config", {}).get("local_registry_path")
+                if reg_path:
+                    cand = Path(reg_path).resolve().parent / "plugins"
+                    if cand.is_dir() and cand.resolve() != target:
+                        return cand.resolve()
+        except Exception:
+            pass
+
+        # 3. Repository root relative to this file
+        current_file = Path(__file__).resolve()
+        possible_manifest = current_file.parents[3] / "manifest.json"
+        if possible_manifest.exists():
+            cand = possible_manifest.parent / "plugins"
+            if cand.is_dir() and cand.resolve() != target:
+                return cand.resolve()
+
+        # 4. Standard developer workspace paths
+        for dev_cand in [
+            Path.home() / "Documents" / "repos" / "caster-plugins" / "plugins",
+            current_file.parents[2],
+        ]:
+            if dev_cand.is_dir() and dev_cand.resolve() != target:
+                return dev_cand.resolve()
+
+        return None
 
     @property
     def source_dir(self) -> Path:
@@ -256,3 +310,37 @@ class PluginSyncEngine:
         for name in plugins:
             results[name] = self.sync_plugin(name, dry_run=dry_run, prune_stale=prune_stale)
         return results
+
+    def discover_target_plugins(self) -> List[str]:
+        """Returns list of plugin package directory names present in target user directory."""
+        if not self._target_dir.exists() or not self._target_dir.is_dir():
+            return []
+
+        plugins = []
+        for child in sorted(self._target_dir.iterdir()):
+            if not child.is_dir() or child.name.startswith((".", "_")):
+                continue
+            if (child / "metadata.toml").exists() or (child / "plugin.py").exists() or (child / "__init__.py").exists():
+                plugins.append(child.name)
+        return plugins
+
+    def get_orphaned_plugins(self) -> List[str]:
+        """Returns list of plugin names present in target directory but absent from source repository."""
+        source_plugins = set(self.discover_source_plugins())
+        return [p for p in self.discover_target_plugins() if p not in source_plugins]
+
+    def prune_orphaned_plugins(self, dry_run: bool = False) -> List[str]:
+        """Removes plugin directories in target directory that no longer exist in source repository."""
+        orphaned = self.get_orphaned_plugins()
+        pruned = []
+        for name in orphaned:
+            target_plugin = self._target_dir / name
+            if not dry_run and target_plugin.exists():
+                try:
+                    shutil.rmtree(target_plugin, ignore_errors=False)
+                    pruned.append(name)
+                except OSError as ex:
+                    _logger.warning("Failed to remove orphaned plugin directory %s: %s", target_plugin, ex)
+            else:
+                pruned.append(name)
+        return pruned

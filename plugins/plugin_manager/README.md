@@ -23,8 +23,7 @@ plugins/plugin_manager/
 ├── __init__.py               # Package exports
 ├── metadata.toml             # Manifest declaration
 ├── plugin.py                 # Caster PluginBase lifecycle hook
-├── plugin_manager_rule.py    # Dragonfly voice companion rules
-├── rules.py                  # Backward-compatibility re-export layer
+├── rules.py                  # Dragonfly voice companion rules
 ├── runner_bridge.py          # Subprocess launcher & Win32 focus manager
 ├── core/
 │   ├── models.py             # Data records (PluginRecord, PluginMetadata, PluginHealthState)
@@ -59,7 +58,7 @@ for record in records:
     print(f"  Enabled: {record.enabled}")
 
 # Toggle plugin enabled state atomically
-registry.set_enabled("themed_hud", True)
+registry.set_enabled("taskbar_hud", True)
 ```
 
 ---
